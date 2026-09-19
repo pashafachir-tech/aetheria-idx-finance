@@ -1,0 +1,9 @@
+{
+  "data": {
+    "subsector": "Oil, Gas & Coal",
+    "companies": [
+      { "symbol": "AKRA", "company_name": "PT AKR Corporindo Tbk", "market_cap": 30510000000000 },
+      { "symbol": "PGAS", "company_name": "PT Perusahaan Gas Negara Tbk", "market_cap": 40000000000000 }
+    ]
+  }
+}

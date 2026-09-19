@@ -1,0 +1,6 @@
+{
+  "data": [
+    { "fiscal_year": 2023, "period_end": "2023-12-31", "currency": "IDR", "revenue": 42500000000.25, "net_income": 2100000000.5, "operating_cash_flow": 1800000000.25, "accounts_receivable": 3900000000, "ebit": 2900000000, "depreciation_and_amortization": 410000000, "capital_expenditure": 520000000, "change_in_nwc": 175000000 },
+    { "fiscal_year": 2024, "period_end": "2024-12-31", "currency": "IDR", "revenue": 46750000000.75, "net_income": 2450000000.25, "operating_cash_flow": 1950000000.5, "accounts_receivable": 4650000000, "ebit": 3375000000, "depreciation_and_amortization": 430000000, "capital_expenditure": 550000000, "change_in_nwc": 210000000 }
+  ]
+}

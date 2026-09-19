@@ -1,0 +1,8 @@
+{
+  "name": "@aetheria/xlsx-export",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}
