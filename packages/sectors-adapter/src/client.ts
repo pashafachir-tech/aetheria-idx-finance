@@ -24,6 +24,8 @@ export interface SectorsEndpoints {
   mostTraded?(): string;
   mostTradedStocks?(): string;
   topCompanyMovers?(): string;
+  topGainers?(): string;
+  topLosers?(): string;
   marketNews?(): string;
   idxMarketSummary?(): string;
   freeFloat?(symbol?: string): string;
@@ -48,7 +50,9 @@ export const defaultSectorsEndpoints: SectorsEndpoints = {
   companyFilings: (ticker) => `/v2/company-filings/?symbol=${ticker}`,
   mostTraded: () => `/v2/most-traded/`,
   mostTradedStocks: () => `/v2/most-traded/`,
-  topCompanyMovers: () => `/v2/top-company-movers/`,
+  topCompanyMovers: () => `/v2/companies/top-changes/?classifications=top_gainers,top_losers&periods=1d&n_stock=50`,
+  topGainers: () => `/v2/companies/top-changes/?classifications=top_gainers&periods=1d&n_stock=50`,
+  topLosers: () => `/v2/companies/top-changes/?classifications=top_losers&periods=1d&n_stock=50`,
   marketNews: () => `/v2/news/`,
   idxMarketSummary: () => `/v2/idx-market-summary/`,
   freeFloat: (symbol) => symbol ? `/v2/free-float/?symbol=${symbol}` : `/v2/free-float/`,
@@ -73,7 +77,9 @@ export const liveSectorsEndpoints: SectorsEndpoints = {
   companyFilings: (ticker) => `v2/company-filings/?symbol=${normalizeTicker(ticker)}`,
   mostTraded: () => `v2/most-traded/`,
   mostTradedStocks: () => `v2/most-traded/`,
-  topCompanyMovers: () => `v2/top-company-movers/`,
+  topCompanyMovers: () => `v2/companies/top-changes/?classifications=top_gainers,top_losers&periods=1d&n_stock=50`,
+  topGainers: () => `v2/companies/top-changes/?classifications=top_gainers&periods=1d&n_stock=50`,
+  topLosers: () => `v2/companies/top-changes/?classifications=top_losers&periods=1d&n_stock=50`,
   marketNews: () => `v2/news/`,
   idxMarketSummary: () => `v2/idx-market-summary/`,
   freeFloat: (symbol) => symbol ? `v2/free-float/?symbol=${normalizeTicker(symbol)}` : `v2/free-float/`,
@@ -180,6 +186,16 @@ export class SectorsRestClient implements SectorsClient {
   getTopCompanyMovers = async (): Promise<unknown> => {
     const fn = this.endpoints.topCompanyMovers ?? defaultSectorsEndpoints.topCompanyMovers!;
     return this.request("top-company-movers", fn());
+  };
+
+  getTopGainers = async (): Promise<unknown> => {
+    const fn = this.endpoints.topGainers ?? defaultSectorsEndpoints.topGainers!;
+    return this.request("top-gainers", fn());
+  };
+
+  getTopLosers = async (): Promise<unknown> => {
+    const fn = this.endpoints.topLosers ?? defaultSectorsEndpoints.topLosers!;
+    return this.request("top-losers", fn());
   };
 
   getMarketNews = async (): Promise<unknown> => {
@@ -422,8 +438,28 @@ export class LiveSectorsClient implements SectorsClient {
 
   getTopCompanyMovers = async (): Promise<unknown> => {
     return this.requestWithFallback("top-company-movers", [
+      "v2/companies/top-changes/?classifications=top_gainers,top_losers&periods=1d&n_stock=50",
+      "companies/top-changes/?classifications=top_gainers,top_losers&periods=1d&n_stock=50",
       "v2/top-company-movers/",
       "top-company-movers/",
+    ]);
+  };
+
+  getTopGainers = async (): Promise<unknown> => {
+    return this.requestWithFallback("top-gainers", [
+      "v2/companies/top-changes/?classifications=top_gainers&periods=1d&n_stock=50",
+      "companies/top-changes/?classifications=top_gainers&periods=1d&n_stock=50",
+      "v2/top-gainers/",
+      "top-gainers/",
+    ]);
+  };
+
+  getTopLosers = async (): Promise<unknown> => {
+    return this.requestWithFallback("top-losers", [
+      "v2/companies/top-changes/?classifications=top_losers&periods=1d&n_stock=50",
+      "companies/top-changes/?classifications=top_losers&periods=1d&n_stock=50",
+      "v2/top-losers/",
+      "top-losers/",
     ]);
   };
 

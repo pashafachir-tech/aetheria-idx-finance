@@ -86,6 +86,8 @@ export interface SectorsClient {
   getMostTraded?(): Promise<unknown>;
   getMostTradedStocks?(): Promise<unknown>;
   getTopCompanyMovers?(): Promise<unknown>;
+  getTopGainers?(): Promise<unknown>;
+  getTopLosers?(): Promise<unknown>;
   getMarketNews?(): Promise<unknown>;
   getIdxMarketSummary?(): Promise<unknown>;
   getFreeFloat?(symbol?: string): Promise<unknown>;
@@ -175,6 +177,77 @@ type RawBankMetrics = {
 };
 
 const financialSectors = new Set(["Financials", "Banking", "Multifinance", "Insurance"]);
+
+function normalizeMostTradedResponse(raw: unknown): MostTradedStockItem[] {
+  if (!raw) return [];
+  if (Array.isArray(raw) && raw.length > 0) {
+    return raw.map((item: any) => ({
+      symbol: String(item.symbol || "").replace(/\.JK$/i, "").toUpperCase(),
+      company_name: String(item.company_name || item.name || item.symbol || ""),
+      price: Number(item.price || item.last_close_price || item.close || 0),
+      volume: Number(item.volume || 0),
+      turnover: Number(item.turnover || (Number(item.price || 0) * Number(item.volume || 0))),
+      change: Number(item.change || item.price_change || 0),
+    }));
+  }
+  if (typeof raw === "object") {
+    const dates = Object.keys(raw as object).filter((k) => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort();
+    if (dates.length > 0) {
+      const latestDate = dates[dates.length - 1];
+      const list = (raw as Record<string, unknown>)[latestDate];
+      if (Array.isArray(list) && list.length > 0) {
+        return list.map((item: any) => ({
+          symbol: String(item.symbol || "").replace(/\.JK$/i, "").toUpperCase(),
+          company_name: String(item.company_name || item.name || item.symbol || ""),
+          price: Number(item.price || item.last_close_price || item.close || 0),
+          volume: Number(item.volume || 0),
+          turnover: Number(item.turnover || (Number(item.price || 0) * Number(item.volume || 0))),
+          change: Number(item.change || item.price_change || 0),
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+function normalizeTopMoversResponse(raw: unknown): TopCompanyMoversData {
+  if (!raw || typeof raw !== "object") return { gainers: [], losers: [] };
+  const r = raw as any;
+
+  if (Array.isArray(r.gainers) && Array.isArray(r.losers) && (r.gainers.length > 0 || r.losers.length > 0)) {
+    return {
+      gainers: r.gainers,
+      losers: r.losers,
+    };
+  }
+
+  const rawGainers = r.top_gainers?.["1d"] || r.top_gainers || r.gainers || [];
+  const rawLosers = r.top_losers?.["1d"] || r.top_losers || r.losers || [];
+
+  const mapItem = (item: any): MostTradedStockItem => {
+    const sym = String(item.symbol || "").replace(/\.JK$/i, "").toUpperCase();
+    const name = String(item.name || item.company_name || sym);
+    const price = Number(item.last_close_price || item.price || item.close || 0);
+    const rawChange = Number(item.price_change ?? item.change ?? 0);
+    const changePct = Math.abs(rawChange) < 1 && rawChange !== 0 ? rawChange * 100 : rawChange;
+    const volume = Number(item.volume || item.daily_volume || 1000000);
+    const turnover = Number(item.turnover || (price * volume));
+
+    return {
+      symbol: sym,
+      company_name: name,
+      price,
+      change: Number(changePct.toFixed(2)),
+      volume,
+      turnover,
+    };
+  };
+
+  return {
+    gainers: Array.isArray(rawGainers) ? rawGainers.map(mapItem) : [],
+    losers: Array.isArray(rawLosers) ? rawLosers.map(mapItem) : [],
+  };
+}
 
 export class SectorsAdapter {
   constructor(
@@ -364,7 +437,8 @@ export class SectorsAdapter {
       if (this.client.getMostTraded) {
         try {
           const res = await this.client.getMostTraded();
-          if (Array.isArray(res) && res.length > 0) return res;
+          const normalized = normalizeMostTradedResponse(res);
+          if (normalized.length > 0) return normalized;
         } catch (e) {
           console.warn("[SectorsAdapter] getMostTraded live fetch failed, using fallback", e);
         }
@@ -379,7 +453,8 @@ export class SectorsAdapter {
       if (this.client.getTopCompanyMovers) {
         try {
           const res = await this.client.getTopCompanyMovers();
-          if (res && typeof res === "object") return res;
+          const normalized = normalizeTopMoversResponse(res);
+          if (normalized.gainers.length > 0 || normalized.losers.length > 0) return normalized;
         } catch (e) {
           console.warn("[SectorsAdapter] getTopCompanyMovers live fetch failed, using fallback", e);
         }
@@ -387,6 +462,16 @@ export class SectorsAdapter {
       return getFallbackTopCompanyMovers();
     });
     return { data: loaded.raw as TopCompanyMoversData, evidence: loaded.evidence, toolCall: loaded.toolCall };
+  }
+
+  async getTopGainers(): Promise<AdapterResult<MostTradedStockItem[]>> {
+    const movers = await this.getTopCompanyMovers();
+    return { data: movers.data.gainers, evidence: movers.evidence, toolCall: movers.toolCall };
+  }
+
+  async getTopLosers(): Promise<AdapterResult<MostTradedStockItem[]>> {
+    const movers = await this.getTopCompanyMovers();
+    return { data: movers.data.losers, evidence: movers.evidence, toolCall: movers.toolCall };
   }
 
   async getMarketNews(): Promise<AdapterResult<MarketNewsItem[]>> {

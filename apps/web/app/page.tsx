@@ -597,21 +597,25 @@ export default function MorningIntelligenceHub() {
                         ))}
                       </div>
 
-                      {/* Affected Tickers Pills */}
+                      {/* Affected Tickers / Top Movers Pills */}
                       <div className="affected-row">
-                        <span className="affected-label">Emiten Terdampak:</span>
+                        <span className="affected-label">Emiten Penggerak (Top Movers):</span>
                         <div className="affected-chips">
-                          {item.affectedTickers.map((tick) => (
-                            <button
-                              key={tick}
-                              type="button"
-                              className={`affected-chip ${tick === item.primaryTicker ? "affected-chip--primary" : ""}`}
-                              onClick={() => goToTicker(tick)}
-                              title={`Buka Forensik & Valuasi ${tick}`}
-                            >
-                              {tick}
-                            </button>
-                          ))}
+                          {item.affectedTickers.map((tick) => {
+                            const sigMatch = item.technicalSetup.signals.find((s) => s.startsWith(`${tick} `));
+                            const changePctStr = sigMatch ? sigMatch.replace(`${tick} `, "") : "";
+                            return (
+                              <button
+                                key={tick}
+                                type="button"
+                                className={`affected-chip ${tick === item.primaryTicker ? "affected-chip--primary" : ""}`}
+                                onClick={() => goToTicker(tick)}
+                                title={`Buka Analisis ${tick}`}
+                              >
+                                {tick} {changePctStr && <small style={{ fontWeight: 700, marginLeft: "2px", opacity: 0.9 }}>{changePctStr}</small>}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
 
