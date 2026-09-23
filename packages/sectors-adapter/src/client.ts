@@ -35,7 +35,7 @@ export interface SectorsEndpoints {
 }
 
 export const defaultSectorsEndpoints: SectorsEndpoints = {
-  companyProfile: (ticker) => `/v1/companies/${ticker}`,
+  companyProfile: (ticker) => `company/report/${normalizeTicker(ticker)}/`,
   financialStatements: (ticker) => `/v1/companies/${ticker}/financials`,
   dailyMarketData: (ticker) => `/v1/companies/${ticker}/daily`,
   subsectorPeers: (ticker) => `/v1/companies/${ticker}/peers`,
@@ -62,7 +62,7 @@ export const defaultSectorsEndpoints: SectorsEndpoints = {
 };
 
 export const liveSectorsEndpoints: SectorsEndpoints = {
-  companyProfile: (ticker) => `company/report/${normalizeTicker(ticker)}/?sections=overview`,
+  companyProfile: (ticker) => `company/report/${normalizeTicker(ticker)}/`,
   financialStatements: (ticker) => `company/financials/${normalizeTicker(ticker)}/`,
   dailyMarketData: (ticker) => `daily/${normalizeTicker(ticker)}/`,
   subsectorPeers: (ticker) => `company/report/${normalizeTicker(ticker)}/?sections=peers`,
@@ -312,9 +312,9 @@ export class LiveSectorsClient implements SectorsClient {
   getCompanyProfile = async (ticker: string): Promise<unknown> => {
     const sym = normalizeTicker(ticker);
     return this.requestWithFallback("company-profile", [
-      `company/report/${sym}/?sections=overview,financials,peers`,
-      `company/report/${sym}/?sections=overview`,
       `company/report/${sym}/`,
+      `company/report/${sym}/?sections=overview`,
+      `company/report/${sym}/?sections=overview,financials,peers`,
     ]);
   };
 

@@ -16,7 +16,7 @@ describe("SectorsRestClient", () => {
 
     await expect(client.getCompanyProfile("akra")).resolves.toEqual({ data: { symbol: "AKRA" } });
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(fetcher.mock.calls[0][0]).toBe("https://sectors.example.test/v1/companies/AKRA");
+    expect(fetcher.mock.calls[0][0]).toBe("https://sectors.example.test/company/report/AKRA/");
   });
 
   it("sends the API key as a bearer header without exposing it elsewhere", async () => {

@@ -30,6 +30,8 @@ export type { SectorsApiConfig, SectorsEndpoints };
 export type { RawResponseCache } from "../../domain/src/index";
 export * from "./fallbacks";
 export * from "./cache-manager";
+export * from "./catalog";
+import { getIdxUniverseCatalogItem } from "./catalog";
 
 import {
   getFallbackCompanyFilings,
@@ -257,8 +259,55 @@ export class SectorsAdapter {
   ) {}
 
   async getCompanyProfile(ticker: string): Promise<AdapterResult<CompanyProfile>> {
-    const loaded = await this.load("getCompanyProfile", ticker, () => this.client.getCompanyProfile(ticker));
-    return mapProfile(loaded.raw as RawProfile, ticker, loaded.evidence, loaded.toolCall);
+    const sym = ticker.trim().toUpperCase().replace(/\.JK$/i, "");
+    try {
+      const loaded = await this.load("getCompanyProfile", sym, () => this.client.getCompanyProfile(sym));
+      return mapProfile(loaded.raw as RawProfile, sym, loaded.evidence, loaded.toolCall);
+    } catch (err) {
+      // Catalog fallback: if Sectors API upstream returns 404 or PROVIDER_FAILURE for this ticker,
+      // construct baseline profile from internal 902-issuer catalog (IDX_UNIVERSE_CATALOG)
+      const is404OrProviderFailure =
+        (err instanceof DomainError && (err.message.includes("404") || err.code === "PROVIDER_FAILURE")) ||
+        (err instanceof Error && err.message.includes("404"));
+
+      if (is404OrProviderFailure) {
+        const catalogItem = getIdxUniverseCatalogItem(sym);
+        if (catalogItem) {
+          console.warn(`[SectorsAdapter] getCompanyProfile upstream 404/failure for ${sym}, falling back to internal IDX_UNIVERSE_CATALOG`);
+          const fallbackEvidence: EvidenceRef = {
+            id: `sectors:getCompanyProfile:${sym}:catalog-fallback`,
+            provider: "sectors",
+            operation: "getCompanyProfile",
+            retrievedAt: this.now().toISOString(),
+            cacheStatus: "hit",
+          };
+          const fallbackToolCall: ToolCallRecord = {
+            operation: "getCompanyProfile",
+            evidenceId: fallbackEvidence.id,
+            cacheStatus: "HIT",
+            latencyMs: 0,
+            timestamp: this.now().toISOString(),
+          };
+          const fallbackRaw: RawProfile = {
+            data: {
+              symbol: catalogItem.ticker,
+              company_name: catalogItem.name,
+              sector: catalogItem.sector,
+              subsector: catalogItem.sector === "Financials" ? "Banks" : catalogItem.sector,
+            },
+            symbol: catalogItem.ticker,
+            company_name: catalogItem.name,
+            overview: {
+              sector: catalogItem.sector,
+              sub_sector: catalogItem.sector === "Financials" ? "Banks" : catalogItem.sector,
+              subsector: catalogItem.sector === "Financials" ? "Banks" : catalogItem.sector,
+            },
+          };
+          return mapProfile(fallbackRaw, sym, fallbackEvidence, fallbackToolCall);
+        }
+      }
+      throw err;
+    }
   }
 
   async getFinancialStatements(ticker: string): Promise<AdapterResult<FinancialHistory>> {

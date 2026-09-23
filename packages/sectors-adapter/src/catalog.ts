@@ -1,10 +1,15 @@
-export interface IdxTickerItem {
+/**
+ * IDX 902 Listed Issuers Universe Catalog.
+ * Internal offline fallback catalog for Sectors API upstream data.
+ */
+
+export interface IdxCatalogItem {
   ticker: string;
   name: string;
   sector: string;
 }
 
-export const IDX_UNIVERSE: IdxTickerItem[] = [
+export const IDX_UNIVERSE_CATALOG: IdxCatalogItem[] = [
   // ─── 1. FINANCIALS (110 Emiten) ───
   { ticker: "ABDA", name: "Asuransi Bina Dana Arta Tbk", sector: "Financials" },
   { ticker: "ADMF", name: "Adira Dinamika Multi Finance Tbk", sector: "Financials" },
@@ -931,83 +936,12 @@ export const IDX_UNIVERSE: IdxTickerItem[] = [
 
 ];
 
-const BLUECHIP_TICKERS = [
-  "BBCA",
-  "BBRI",
-  "BMRI",
-  "BBNI",
-  "BRIS",
-  "BUMI",
-  "BDMN",
-  "ASII",
-  "TLKM",
-  "ICBP",
-  "INDF",
-  "AMRT",
-  "AKRA",
-  "MEDC",
-  "PGAS",
-  "KLBF",
-  "UNVR",
-  "GOTO",
-  "ADRO",
-  "PTBA",
-];
-const BLUECHIP_ORDER = new Map(BLUECHIP_TICKERS.map((t, idx) => [t, idx]));
-
-/**
- * Instant client-side search across IDX universe.
- * Prioritizes: Starts with ticker (Bluechips ranked first) -> Contains ticker -> Contains company name.
- * Saat user mengetik "B", saham raksasa (BBCA, BBRI, BMRI, BBNI, BRIS, BUMI, BDMN) langsung menduduki baris teratas.
- * Zero network latency (0ms) and zero API quota consumption.
- */
-export function searchIdxTickers(query: string, limit = 8): IdxTickerItem[] {
-  if (!query || !query.trim()) return [];
-  const q = query.trim().toUpperCase();
-
-  // 1. Prioritas Pertama: Ticker yang DIAWALI dengan query (misal: "B" -> BBCA, BBRI, BMRI, BBNI, BRIS, BUMI, BDMN)
-  const startsWithTicker = IDX_UNIVERSE.filter((item) => item.ticker.startsWith(q));
-
-  // Urutkan startsWithTicker: Tempatkan saham raksasa/populer teratas
-  startsWithTicker.sort((a, b) => {
-    if (a.ticker === q) return -1;
-    if (b.ticker === q) return 1;
-
-    const rankA = BLUECHIP_ORDER.has(a.ticker) ? (BLUECHIP_ORDER.get(a.ticker) as number) : 999;
-    const rankB = BLUECHIP_ORDER.has(b.ticker) ? (BLUECHIP_ORDER.get(b.ticker) as number) : 999;
-    if (rankA !== rankB) return rankA - rankB;
-    return a.ticker.localeCompare(b.ticker);
-  });
-
-  // 2. Prioritas Kedua: Ticker yang MENGANDUNG query di tengah
-  const containsTicker = IDX_UNIVERSE.filter(
-    (item) => !item.ticker.startsWith(q) && item.ticker.includes(q)
-  );
-
-  // 3. Prioritas Ketiga: Nama perusahaan yang diawali / mengandung query
-  const containsName = IDX_UNIVERSE.filter(
-    (item) => !item.ticker.includes(q) && item.name.toUpperCase().includes(q)
-  );
-
-  // Gabungkan dan potong sesuai limit
-  return [...startsWithTicker, ...containsTicker, ...containsName].slice(0, limit);
-}
-
-/**
- * Direct O(1) lookup helper by ticker symbol.
- */
-const TICKER_MAP = new Map<string, IdxTickerItem>();
-for (const item of IDX_UNIVERSE) {
+const TICKER_MAP = new Map<string, IdxCatalogItem>();
+for (const item of IDX_UNIVERSE_CATALOG) {
   TICKER_MAP.set(item.ticker, item);
 }
 
-export function getIdxTicker(ticker: string): IdxTickerItem | undefined {
+export function getIdxUniverseCatalogItem(ticker: string): IdxCatalogItem | undefined {
   if (!ticker) return undefined;
-  return TICKER_MAP.get(ticker.trim().toUpperCase());
+  return TICKER_MAP.get(ticker.trim().toUpperCase().replace(/\.JK$/i, ''));
 }
-
-/**
- * Total active ticker count in this universe dataset.
- */
-export const IDX_UNIVERSE_COUNT = IDX_UNIVERSE.length;
-export const IDX_UNIVERSE_CATALOG = IDX_UNIVERSE;
