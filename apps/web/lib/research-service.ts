@@ -1,48 +1,184 @@
 import { randomUUID } from "node:crypto";
-import { DomainError, type MarketSnapshot, type AnnualFinancialStatement } from "../../../packages/domain/src/index";
-import { createSectorsAdapter, sectorsConfigFromEnv, type SectorsAdapter, type SectorsClient } from "../../../packages/sectors-adapter/src/index";
+import { loadAppEnv } from "./env-loader";
+import { DomainError, type AdapterResult, type AnnualFinancialStatement, type AssumptionRecord, type BankMetrics, type CompanyProfile, type FinancialHistory, type MarketSnapshot, type NewsItem, type SubsectorPeers, type ToolCallRecord } from "../../../packages/domain/src/index";
+import {
+  createSectorsAdapter,
+  sectorsConfigFromEnv,
+  type SectorsAdapter,
+  type SectorsClient,
+  type ShareholdersCompositionData,
+  type SubsectorReportData,
+  type QuarterlyFinancialsData,
+  type StockSuspensionsData,
+  type CorporateActionsData,
+  type TopBuyersSellersData,
+  type DailyNetForeignItem,
+} from "../../../packages/sectors-adapter/src/index";
 import { FileEvidenceCache } from "../../../packages/evidence-store/src/index";
 import {
   AgentOrchestrator,
+  PlannerAgent,
+  runDag,
   type CollectedResearch,
   type MemoWriter,
   type ResearchDataSource,
-  type ResearchPlanner,
   type ResearchSnapshot,
   type AnalystDecision,
 } from "../../../packages/agent-orchestrator/src/index";
+import { generateResearchPlan } from "./gemini-service";
 import {
-  applyFcffHaircut,
+  buildCashFlowBridge,
   calculateFcff,
-  calculateReverseDcf,
+  calculateResidualIncome,
   evaluateReceivablesDivergence,
+  routeValuationModel,
+  type CashFlowBridge,
   type DcfInputs,
+  type ModelApplicability,
+  type ResidualIncomeInputs,
+  type ResidualIncomeValue,
   type ReverseDcfValue,
 } from "../../../packages/finance-engine/src/index";
-import { createResearchWorkbook } from "../../../packages/xlsx-export/src/index";
+import { createResearchWorkbook, createResidualIncomeWorkbook } from "../../../packages/xlsx-export/src/index";
 import profileFixture from "../../../fixtures/akra/company-profile.json";
 import financialsFixture from "../../../fixtures/akra/financial-statements.json";
 import marketFixture from "../../../fixtures/akra/daily-market-data.json";
 import peersFixture from "../../../fixtures/akra/subsector-peers.json";
+import bbriProfileFixture from "../../../fixtures/bbri/company-profile.json";
+import bbriMarketFixture from "../../../fixtures/bbri/daily-market-data.json";
+import bbriPeersFixture from "../../../fixtures/bbri/subsector-peers.json";
+import bbriBankMetricsFixture from "../../../fixtures/bbri/bank-metrics.json";
 
-export const demoAssumptions = {
-  wacc: 0.12,
-  terminalGrowth: 0.04,
-  taxRate: 0.22,
-  forecastYears: 5,
-  forecastGrowthRate: 0.05,
-  cash: 4_100_000_000,
-  totalDebt: 11_800_000_000,
-  minorityInterest: 0,
+export const assumptionRegistry: AssumptionRecord[] = [
+  { key: "wacc", value: 0.12, unit: "decimal", source: "HISTORICAL_BASELINE", version: 1 },
+  { key: "terminalGrowth", value: 0.04, unit: "decimal", source: "HISTORICAL_BASELINE", version: 1 },
+  { key: "taxRate", value: 0.22, unit: "decimal", source: "HISTORICAL_BASELINE", version: 1 },
+  { key: "forecastYears", value: 5, unit: "years", source: "HISTORICAL_BASELINE", version: 1 },
+  { key: "forecastGrowthRate", value: 0.05, unit: "decimal", source: "HISTORICAL_BASELINE", version: 1 },
+  { key: "cash", value: 4_100_000_000_000, unit: "IDR", source: "SECTORS_API_DERIVED", version: 1 },
+  { key: "totalDebt", value: 11_800_000_000_000, unit: "IDR", source: "SECTORS_API_DERIVED", version: 1 },
+  { key: "minorityInterest", value: 0, unit: "IDR", source: "SECTORS_API_DERIVED", version: 1 },
+];
+
+function assumptionValue(key: string): number {
+  const record = assumptionRegistry.find((item) => item.key === key);
+  if (!record) throw new DomainError("INCOMPLETE_DATA", `Assumption "${key}" is not registered.`, "Register the assumption in the AssumptionRegistry before running the model.");
+  return record.value;
+}
+
+const modelAssumptions = {
+  wacc: assumptionValue("wacc"),
+  terminalGrowth: assumptionValue("terminalGrowth"),
+  taxRate: assumptionValue("taxRate"),
+  forecastYears: assumptionValue("forecastYears"),
+  forecastGrowthRate: assumptionValue("forecastGrowthRate"),
+  cash: assumptionValue("cash"),
+  totalDebt: assumptionValue("totalDebt"),
+  minorityInterest: assumptionValue("minorityInterest"),
 } as const;
 
+export interface ResearchModelInputs {
+  forecastFcff: number[];
+  wacc: number;
+  terminalGrowth: number;
+  cash: number;
+  totalDebt: number;
+  minorityInterest: number;
+  sharesOutstanding: number;
+}
+
 export interface ResearchPresentation {
+  ticker?: string;
+  sector?: string;
+  subsector?: string;
   marketPrice: number | null;
   historicalRevenueGrowth: number | null;
   suggestedHaircut: number;
   reverseDcf: ReverseDcfValue | null;
   mode: "live" | "fixture";
+  modelInputs: ResearchModelInputs | null;
+  cashFlowBridge: CashFlowBridge | null;
+  modelApplicability: ModelApplicability | null;
+  news: NewsItem[];
+  peers: SubsectorPeers | null;
+  residualIncome: ResidualIncomeValue | null;
+  bankMetrics: BankMetrics | null;
+  sharesOutstanding?: number;
+  freeFloat?: number;
+  shareholdersComposition?: ShareholdersCompositionData | null;
+  subsectorReport?: SubsectorReportData | null;
+  quarterlyFinancials?: QuarterlyFinancialsData | null;
+  stockSuspensions?: StockSuspensionsData | null;
+  corporateActions?: CorporateActionsData | null;
+  topBuyersSellers?: TopBuyersSellersData | null;
+  dailyNetForeignInflow?: { symbol: string; data: DailyNetForeignItem[] } | null;
+  historicalPriceSeries?: Array<{
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }> | null;
+  companyName?: string;
+  companyProfile?: {
+    overview?: { description?: string };
+    description?: string;
+    sector?: string;
+    subsector?: string;
+  };
+  forensics?: {
+    cfoToNi?: { status: string; ratio?: number };
+    receivablesDivergence?: { status: string; ratio?: number };
+  };
+  qualityScorecard?: {
+    score: number;
+    grade: string;
+    receivablesDivergence?: number;
+    dsoTrendDays?: number;
+    cfoToNi?: number;
+  };
+  financialStatements?: Array<{
+    periodEnd: string;
+    revenue: number;
+    netIncome: number;
+    operatingCashFlow: number;
+    accountsReceivable: number;
+  }>;
+  dagTrace?: ToolCallRecord[];
+  retrievedAt?: string;
 }
+
+export const staticNews: NewsItem[] = [
+  {
+    id: "news-jippe",
+    title: "Ekspansi JIIPE Gresik & KEK JIIPE",
+    aiSummary: "Kompresi AI: utilisasi lahan kawasan industri dan pendapatan berulang JIIPE menopang visibilitas pertumbuhan jangka panjang.",
+    body: "Sentimen positif: permintaan lahan industri dan tenant baru di JIIPE mendukung pendapatan berulang serta margin yang lebih stabil.",
+    sentiment: "positive",
+    tag: "POSITIF",
+    source: { outlet: "Sectors Market & Corporate Action Feed", url: "" },
+    related: [
+      { ticker: "PGAS", note: "Infrastruktur & distribusi gas kawasan industri" },
+      { ticker: "ASII", note: "Rantai pasok logistik & distribusi otomotif" },
+      { ticker: "SMGR", note: "Material konstruksi untuk ekspansi kawasan" },
+    ],
+  },
+  {
+    id: "news-working-capital",
+    title: "Fluktuasi Volume Distribusi Migas & Modal Kerja",
+    aiSummary: "Kompresi AI: siklus volume migas dan modal kerja mengikat kas, berpotensi menekan konversi kas jangka pendek.",
+    body: "Netral/waspada: volatilitas volume distribusi dan penumpukan piutang dapat memperlambat konversi kas.",
+    sentiment: "neutral",
+    tag: "NETRAL",
+    source: { outlet: "Sectors Market & Corporate Action Feed", url: "" },
+    related: [
+      { ticker: "PGAS", note: "Eksposur volume gas & margin distribusi" },
+      { ticker: "PTBA", note: "Siklus harga & volume energi" },
+      { ticker: "UNTR", note: "Permintaan alat berat & logistik tambang" },
+    ],
+  },
+];
 
 export class SectorsResearchDataSource implements ResearchDataSource {
   statements: AnnualFinancialStatement[] = [];
@@ -50,22 +186,141 @@ export class SectorsResearchDataSource implements ResearchDataSource {
   marketPrice: number | null = null;
   historicalRevenueGrowth: number | null = null;
   valuation: Partial<DcfInputs> = {};
+  cashFlowBridge: CashFlowBridge | null = null;
+  sector: string | null = null;
+  subsector: string | null = null;
+  companyName: string = "";
+  companyDescription: string = "";
+  retrievedAt: string = "";
+  modelApplicability: ModelApplicability | null = null;
+  news: NewsItem[] = [];
+  peers: SubsectorPeers | null = null;
+  bankMetrics: BankMetrics | null = null;
+  residualIncomeInputs: ResidualIncomeInputs | null = null;
+  residualIncome: ResidualIncomeValue | null = null;
+  shareholdersComposition: ShareholdersCompositionData | null = null;
+  dailyNetForeignInflow: { symbol: string; data: DailyNetForeignItem[] } | null = null;
+  subsectorReport: SubsectorReportData | null = null;
+  quarterlyFinancials: QuarterlyFinancialsData | null = null;
+  stockSuspensions: StockSuspensionsData | null = null;
+  corporateActions: CorporateActionsData | null = null;
+  topBuyersSellers: TopBuyersSellersData | null = null;
 
-  constructor(private readonly adapter: SectorsAdapter) {}
+  constructor(
+    private readonly adapter: SectorsAdapter,
+    private readonly newsProvider?: () => Promise<NewsItem[]>,
+  ) {}
 
   async load(ticker: string): Promise<CollectedResearch> {
-    const [profileResult, historyResult, marketResult] = await Promise.all([
-      this.adapter.getCompanyProfile(ticker),
-      this.adapter.getFinancialStatements(ticker),
-      this.adapter.getDailyMarketData(ticker),
-    ]);
-    if (profileResult.data.coverage !== "supported") {
-      throw new DomainError("UNSUPPORTED_SECTOR", `${ticker} is a financial-sector issuer.`, "Non-financial DCF valuation for this issuer is coming next.");
-    }
+    const profileResult = await this.adapter.getCompanyProfile(ticker);
+    this.sector = profileResult.data.sector.value;
+    this.subsector = profileResult.data.subsector?.value ?? null;
+    this.companyName = profileResult.data.name.value;
+    this.companyDescription = (profileResult.data as any).overview?.description || (profileResult.data as any).description || "";
+    this.retrievedAt = profileResult.evidence.retrievedAt;
+    this.modelApplicability = routeValuationModel({ ticker, sector: this.sector });
+    const financial = this.modelApplicability.coverage === "financial";
 
-    this.statements = historyResult.data.annual;
+    const subsectorSlug = this.subsector ? this.subsector.toLowerCase().replace(/\s+/g, "-") : (financial ? "banks" : "energy");
+
+    const nodes: Array<{ id: string; run: () => Promise<unknown> }> = [
+      { id: "market", run: () => this.adapter.getDailyMarketData(ticker) },
+      { id: "peers", run: () => this.adapter.getSubsectorPeers(ticker) },
+      { id: "news", run: async () => (this.newsProvider ? this.newsProvider() : []) },
+      { id: "shareholders", run: () => this.adapter.getShareholdersComposition(ticker) },
+      { id: "dailyNetForeignInflow", run: () => this.adapter.getDailyNetForeignInflow(ticker) },
+      { id: "subsectorReport", run: () => this.adapter.getSubsectorAggregatedReport(subsectorSlug) },
+      { id: "quarterly", run: () => this.adapter.getCompanyQuarterlyFinancials(ticker) },
+      { id: "suspensions", run: () => this.adapter.getStockSuspensions(ticker) },
+      { id: "corporateActions", run: () => this.adapter.getCorporateActions(ticker) },
+      { id: "topBuyersSellers", run: () => this.adapter.getTopBuyersSellers(ticker) },
+    ];
+    if (financial) nodes.push({ id: "metrics", run: () => this.adapter.getFinancialMetrics(ticker) });
+    else nodes.push({ id: "financials", run: () => this.adapter.getFinancialStatements(ticker) });
+
+    const dag = await runDag<unknown>(nodes);
+    const marketResult = dag.results.market as AdapterResult<MarketSnapshot>;
+    const peersResult = dag.results.peers as AdapterResult<SubsectorPeers>;
+    const shareholdersRes = dag.results.shareholders as AdapterResult<ShareholdersCompositionData> | undefined;
+    const dailyNetForeignInflowRes = dag.results.dailyNetForeignInflow as AdapterResult<{ symbol: string; data: DailyNetForeignItem[] }> | undefined;
+    const subsectorReportRes = dag.results.subsectorReport as AdapterResult<SubsectorReportData> | undefined;
+    const quarterlyRes = dag.results.quarterly as AdapterResult<QuarterlyFinancialsData> | undefined;
+    const suspensionsRes = dag.results.suspensions as AdapterResult<StockSuspensionsData> | undefined;
+    const corporateActionsRes = dag.results.corporateActions as AdapterResult<CorporateActionsData> | undefined;
+    const topBuyersSellersRes = dag.results.topBuyersSellers as AdapterResult<TopBuyersSellersData> | undefined;
+
+    this.shareholdersComposition = shareholdersRes?.data ?? null;
+    this.dailyNetForeignInflow = dailyNetForeignInflowRes?.data ?? null;
+    this.subsectorReport = subsectorReportRes?.data ?? null;
+    this.quarterlyFinancials = quarterlyRes?.data ?? null;
+    this.stockSuspensions = suspensionsRes?.data ?? null;
+    this.corporateActions = corporateActionsRes?.data ?? null;
+    this.topBuyersSellers = topBuyersSellersRes?.data ?? null;
+
+    this.news = (dag.results.news as NewsItem[]) ?? [];
+    this.peers = peersResult.data;
     this.market = marketResult.data;
     this.marketPrice = marketResult.data.lastPrice.value;
+
+    const allEvidence = [
+      profileResult.evidence,
+      marketResult.evidence,
+      peersResult.evidence,
+      financial ? (dag.results.metrics as any)?.evidence : (dag.results.financials as any)?.evidence,
+      shareholdersRes?.evidence,
+      dailyNetForeignInflowRes?.evidence,
+      corporateActionsRes?.evidence,
+      quarterlyRes?.evidence,
+      suspensionsRes?.evidence,
+      topBuyersSellersRes?.evidence,
+      subsectorReportRes?.evidence,
+    ].filter(Boolean);
+
+    const allToolCalls = [
+      profileResult.toolCall,
+      marketResult.toolCall,
+      peersResult.toolCall,
+      financial ? (dag.results.metrics as any)?.toolCall : (dag.results.financials as any)?.toolCall,
+      shareholdersRes?.toolCall,
+      dailyNetForeignInflowRes?.toolCall,
+      corporateActionsRes?.toolCall,
+      quarterlyRes?.toolCall,
+      suspensionsRes?.toolCall,
+      topBuyersSellersRes?.toolCall,
+      subsectorReportRes?.toolCall,
+    ].filter(Boolean);
+
+    if (financial) {
+      const metricsResult = dag.results.metrics as AdapterResult<BankMetrics>;
+      this.bankMetrics = metricsResult.data;
+      const roeVal = metricsResult.data.roe.value;
+      const bvVal = metricsResult.data.bookValuePerShare.value;
+      const keVal = metricsResult.data.costOfEquity.value || 0.10;
+      const kVal = metricsResult.data.payoutRatio.value || 0.50;
+      this.residualIncomeInputs = {
+        bookValuePerShare: bvVal,
+        roe: roeVal,
+        costOfEquity: keVal,
+        growth: 0.04,
+        payoutRatio: kVal,
+        years: modelAssumptions.forecastYears,
+      };
+      return {
+        forensicPeriods: [],
+        valuation: {},
+        evidence: allEvidence,
+        suggestedHaircut: 0,
+        sector: this.sector,
+        marketPrice: this.marketPrice ?? undefined,
+        modelApplicability: this.modelApplicability,
+        residualIncomeInputs: this.residualIncomeInputs,
+        news: this.news,
+        toolTrace: allToolCalls,
+      };
+    }
+
+    const historyResult = dag.results.financials as AdapterResult<FinancialHistory>;
+    this.statements = historyResult.data.annual;
 
     const periods = this.statements.map((statement) => ({
       periodEnd: statement.periodEnd,
@@ -82,14 +337,36 @@ export class SectorsResearchDataSource implements ResearchDataSource {
     }
 
     this.valuation = this.buildForecast();
+    this.cashFlowBridge = this.buildBridge();
     const receivables = evaluateReceivablesDivergence(periods);
     const suggestedHaircut = receivables.status === "flagged" ? 0.15 : 0.1;
     return {
       forensicPeriods: periods,
       valuation: this.valuation,
-      evidence: [profileResult.evidence, historyResult.evidence, marketResult.evidence],
+      evidence: allEvidence,
       suggestedHaircut,
+      sector: this.sector,
+      marketPrice: this.marketPrice ?? undefined,
+      cashFlowBridge: this.cashFlowBridge ?? undefined,
+      modelApplicability: this.modelApplicability,
+      news: this.news,
+      toolTrace: allToolCalls,
     };
+  }
+
+  private buildBridge(): CashFlowBridge | null {
+    const latest = this.statements.at(-1);
+    if (!latest) return null;
+    const result = buildCashFlowBridge({
+      netIncome: latest.netIncome.value,
+      depreciationAndAmortization: latest.depreciationAndAmortization.value,
+      changeInNwc: latest.changeInNwc.value,
+      operatingCashFlow: latest.operatingCashFlow.value,
+      capitalExpenditure: latest.capitalExpenditure.value,
+      ebit: latest.ebit.value,
+      taxRate: modelAssumptions.taxRate,
+    });
+    return result.status === "ok" ? result.value : null;
   }
 
   private buildForecast(): Partial<DcfInputs> {
@@ -97,21 +374,21 @@ export class SectorsResearchDataSource implements ResearchDataSource {
     if (!latest) throw new DomainError("INCOMPLETE_DATA", "No annual statements are available for forecasting.", "Retry with a ticker that has at least one annual statement.");
     const fcffResult = calculateFcff({
       ebit: latest.ebit.value,
-      taxRate: demoAssumptions.taxRate,
+      taxRate: modelAssumptions.taxRate,
       depreciationAndAmortization: latest.depreciationAndAmortization.value,
       capitalExpenditure: latest.capitalExpenditure.value,
       changeInNwc: latest.changeInNwc.value,
     });
     if (fcffResult.status === "incomplete_data") throw new DomainError("INCOMPLETE_DATA", `Base FCFF could not be derived: ${fcffResult.missing.join(", ")}.`, "Refresh the financial statements from the provider.");
     if (fcffResult.status === "invalid_assumption") throw new DomainError("INCOMPLETE_DATA", `Base FCFF assumptions are invalid: ${fcffResult.reason}.`, "Review the tax rate and statement inputs.");
-    const forecastFcff = Array.from({ length: demoAssumptions.forecastYears }, (_, index) => fcffResult.value * (1 + demoAssumptions.forecastGrowthRate) ** (index + 1));
+    const forecastFcff = Array.from({ length: modelAssumptions.forecastYears }, (_, index) => fcffResult.value * (1 + modelAssumptions.forecastGrowthRate) ** (index + 1));
     return {
       forecastFcff,
-      wacc: demoAssumptions.wacc,
-      terminalGrowth: demoAssumptions.terminalGrowth,
-      cash: demoAssumptions.cash,
-      totalDebt: demoAssumptions.totalDebt,
-      minorityInterest: demoAssumptions.minorityInterest,
+      wacc: modelAssumptions.wacc,
+      terminalGrowth: modelAssumptions.terminalGrowth,
+      cash: modelAssumptions.cash,
+      totalDebt: modelAssumptions.totalDebt,
+      minorityInterest: modelAssumptions.minorityInterest,
       sharesOutstanding: this.market?.sharesOutstanding.value ?? 0,
     };
   }
@@ -123,25 +400,10 @@ export interface ResearchRunRecord {
   startedAt: string;
   orchestrator: AgentOrchestrator;
   dataSource: SectorsResearchDataSource;
-  reverseDcf: ReverseDcfValue | null;
   mode: "live" | "fixture";
 }
 
 const runStore = (globalThis as { __aetheriaResearchRuns?: Map<string, ResearchRunRecord> }).__aetheriaResearchRuns ??= new Map<string, ResearchRunRecord>();
-
-const scriptedPlanner: ResearchPlanner = {
-  createPlan: async ({ ticker }) => ({
-    objective: `Assess ${ticker} with Sectors evidence and deterministic valuation.`,
-    steps: [
-      { id: "route", description: "Confirm the issuer is non-financial and eligible for FCFF." },
-      { id: "collect", description: "Collect Sectors evidence: profile, annual financials, and market snapshot." },
-      { id: "validate", description: "Validate financial period completeness and DCF inputs." },
-      { id: "forensics", description: "Evaluate CFO-to-NI and receivables divergence." },
-      { id: "analyst", description: "Analyst checkpoint on the suggested FCFF haircut." },
-      { id: "value", description: "Calculate DCF and reverse DCF with the approved haircut." },
-    ],
-  }),
-};
 
 const scriptedMemoWriter: MemoWriter = {
   writeMemo: async ({ facts }) => ({
@@ -151,25 +413,58 @@ const scriptedMemoWriter: MemoWriter = {
   }),
 };
 
-export function createRunAdapter(): { adapter: SectorsAdapter; mode: "live" | "fixture" } {
-  if (process.env.USE_FIXTURES === "true") {
-    const client: SectorsClient = {
-      getCompanyProfile: async () => profileFixture,
-      getFinancialStatements: async () => financialsFixture,
-      getDailyMarketData: async () => marketFixture,
-      getSubsectorPeers: async () => peersFixture,
-    };
-    return { adapter: createSectorsAdapter({ mode: "fixture", client }), mode: "fixture" };
+export function createRunAdapter(customEnv?: Partial<NodeJS.ProcessEnv>): { adapter: SectorsAdapter; mode: "live" | "fixture" } {
+  const loaded = loadAppEnv();
+  const env = customEnv ? { ...loaded, ...customEnv } : loaded;
+  const hasApiKey = Boolean(env.SECTORS_API_KEY?.trim());
+  const useFixtures = env.USE_FIXTURES === "true";
+  if (useFixtures || !hasApiKey) {
+    return { adapter: createSectorsAdapter({ mode: "fixture", client: fixtureClient() }), mode: "fixture" };
   }
-  const config = sectorsConfigFromEnv();
+  const config = sectorsConfigFromEnv(env);
   return { adapter: createSectorsAdapter({ mode: "live", config }, new FileEvidenceCache()), mode: "live" };
+}
+
+function fixtureClient(): SectorsClient {
+  const guard = (ticker: string): string => {
+    const upper = ticker.trim().toUpperCase();
+    if (upper !== "AKRA" && upper !== "BBRI") {
+      throw new DomainError(
+        "INCOMPLETE_DATA",
+        `Fixture data is bundled for AKRA and BBRI only; received ${upper}.`,
+        "Run AKRA or BBRI for the fixture demo, or configure SECTORS_API_KEY and SECTORS_API_BASE_URL in .env.local for live Sectors data.",
+      );
+    }
+    return upper;
+  };
+  return {
+    getCompanyProfile: async (ticker) => (guard(ticker) === "BBRI" ? bbriProfileFixture : profileFixture),
+    getFinancialStatements: async (ticker) => { guard(ticker); return financialsFixture; },
+    getDailyMarketData: async (ticker) => (guard(ticker) === "BBRI" ? bbriMarketFixture : marketFixture),
+    getSubsectorPeers: async (ticker) => (guard(ticker) === "BBRI" ? bbriPeersFixture : peersFixture),
+    getFinancialMetrics: async (ticker) => {
+      const upper = guard(ticker);
+      if (upper !== "BBRI") throw new DomainError("INCOMPLETE_DATA", `Bank metrics are not available for ${upper}.`, "Run a financial-sector issuer such as BBRI for the residual income model.");
+      return bbriBankMetricsFixture;
+    },
+  };
 }
 
 export async function startResearch(ticker: string): Promise<{ id: string; snapshot: ResearchSnapshot; presentation: ResearchPresentation }> {
   const { adapter, mode } = createRunAdapter();
-  const dataSource = new SectorsResearchDataSource(adapter);
-  const orchestrator = new AgentOrchestrator(scriptedPlanner, scriptedMemoWriter, { dataSource });
-  const record: ResearchRunRecord = { id: randomUUID(), ticker: ticker.toUpperCase(), startedAt: new Date().toISOString(), orchestrator, dataSource, reverseDcf: null, mode };
+  const isAkra = ticker.trim().toUpperCase() === "AKRA";
+  const dataSource = new SectorsResearchDataSource(adapter, async () => (isAkra ? staticNews : []));
+  const planner = new PlannerAgent(
+    { generatePlan: (input) => generateResearchPlan(input) },
+    {
+      profileLookup: async (lookupTicker) => {
+        const profile = await adapter.getCompanyProfile(lookupTicker);
+        return { ticker: lookupTicker, sector: profile.data.sector.value };
+      },
+    },
+  );
+  const orchestrator = new AgentOrchestrator(planner, scriptedMemoWriter, { dataSource });
+  const record: ResearchRunRecord = { id: randomUUID(), ticker: ticker.toUpperCase(), startedAt: new Date().toISOString(), orchestrator, dataSource, mode };
   runStore.set(record.id, record);
   const snapshot = await orchestrator.run(ticker);
   return { id: record.id, snapshot, presentation: buildPresentationForRun(record) };
@@ -182,7 +477,6 @@ export function getRun(id: string): ResearchRunRecord | undefined {
 export async function recordDecision(id: string, input: Omit<AnalystDecision, "decidedAt">): Promise<{ snapshot: ResearchSnapshot; presentation: ResearchPresentation }> {
   const record = requireRun(id);
   const snapshot = await record.orchestrator.applyDecision(input);
-  if (snapshot.state === "exporting" || snapshot.state === "completed") replayReverseDcf(record);
   return { snapshot, presentation: buildPresentationForRun(record) };
 }
 
@@ -195,13 +489,41 @@ export function buildRunWorkbook(id: string): Promise<Uint8Array> {
   const analystDecision = snapshot.analystDecision;
   if (!analystDecision) throw new DomainError("INCOMPLETE_DATA", "The analyst decision is missing from the research run.", "Record the analyst decision before exporting.");
   const evidence = snapshot.collected?.evidence ?? [];
+
+  const isFinancial = record.dataSource.modelApplicability?.coverage === "financial" || record.dataSource.bankMetrics !== null;
+
+  if (isFinancial && record.dataSource.bankMetrics) {
+    return createResidualIncomeWorkbook({
+      ticker: record.ticker,
+      companyName: record.dataSource.companyName || record.ticker,
+      bankMetrics: record.dataSource.bankMetrics,
+      market: record.dataSource.market!,
+      assumptions: {
+        terminalGrowth: modelAssumptions.terminalGrowth,
+        years: modelAssumptions.forecastYears,
+        haircut: analystDecision.finalHaircut,
+      },
+      analystDecision,
+      evidence,
+      auditTrail: [
+        { timestamp: record.startedAt, state: "planning", detail: `Research run ${record.id} started for ${record.ticker} (${record.mode}).` },
+        { timestamp: analystDecision.decidedAt, state: "valuing", detail: `Analyst decided "${analystDecision.action}" with haircut ${analystDecision.finalHaircut}.` },
+      ],
+      runId: record.id,
+      residualIncome: snapshot.residualIncome ?? undefined,
+    });
+  }
+
   return createResearchWorkbook({
     ticker: record.ticker,
     financials: record.dataSource.statements,
     market: record.dataSource.market!,
-    assumptions: { ...completeValuation(record.dataSource.valuation), taxRate: demoAssumptions.taxRate, haircut: analystDecision.finalHaircut },
+    assumptions: { ...completeValuation(record.dataSource.valuation), taxRate: modelAssumptions.taxRate, haircut: analystDecision.finalHaircut },
     analystDecision,
     evidence,
+    assumptionRecords: assumptionRegistry,
+    qualityScorecard: snapshot.qualityScorecard,
+    runId: record.id,
     auditTrail: [
       { timestamp: record.startedAt, state: "planning", detail: `Research run ${record.id} started for ${record.ticker} (${record.mode}).` },
       { timestamp: analystDecision.decidedAt, state: "valuing", detail: `Analyst decided "${analystDecision.action}" with haircut ${analystDecision.finalHaircut}.` },
@@ -216,31 +538,88 @@ function completeValuation(input: Partial<DcfInputs>): DcfInputs {
   return input as DcfInputs;
 }
 
-function replayReverseDcf(record: ResearchRunRecord): void {
-  const snapshot = record.orchestrator.current;
-  if (!snapshot.analystDecision || record.dataSource.marketPrice === null) return;
-  const haircutApplied = applyFcffHaircut(record.dataSource.valuation.forecastFcff ?? [], snapshot.analystDecision.finalHaircut);
-  if (haircutApplied.status !== "ok") return;
-  const reverse = calculateReverseDcf({
-    forecastFcff: haircutApplied.value,
-    wacc: record.dataSource.valuation.wacc,
-    terminalGrowth: record.dataSource.valuation.terminalGrowth,
-    cash: record.dataSource.valuation.cash,
-    totalDebt: record.dataSource.valuation.totalDebt,
-    minorityInterest: record.dataSource.valuation.minorityInterest,
-    sharesOutstanding: record.dataSource.valuation.sharesOutstanding,
-    marketPrice: record.dataSource.marketPrice,
-  });
-  record.reverseDcf = reverse.status === "ok" ? reverse.value : null;
-}
-
 export function buildPresentationForRun(record: ResearchRunRecord): ResearchPresentation {
+  const snapshot = record.orchestrator.current;
   return {
+    ticker: record.ticker,
+    sector: record.dataSource.sector ?? undefined,
+    subsector: record.dataSource.subsector ?? undefined,
     marketPrice: record.dataSource.marketPrice,
     historicalRevenueGrowth: record.dataSource.historicalRevenueGrowth,
-    suggestedHaircut: record.orchestrator.current.collected?.suggestedHaircut ?? 0.1,
-    reverseDcf: record.reverseDcf,
+    suggestedHaircut: snapshot.collected?.suggestedHaircut ?? 0.1,
+    reverseDcf: snapshot.reverseDcf ?? null,
     mode: record.mode,
+    modelInputs: toModelInputs(record.dataSource.valuation),
+    sharesOutstanding: record.dataSource.market?.sharesOutstanding.value ?? (record.ticker === "BBRI" ? 151_559_002_572 : undefined),
+    freeFloat: record.dataSource.shareholdersComposition?.public_float_pct ?? 46.76,
+    cashFlowBridge: snapshot.collected?.cashFlowBridge ?? null,
+    modelApplicability: record.dataSource.modelApplicability,
+    news: record.dataSource.news,
+    peers: record.dataSource.peers,
+    residualIncome: snapshot.residualIncome ?? null,
+    bankMetrics: record.dataSource.bankMetrics,
+    shareholdersComposition: record.dataSource.shareholdersComposition,
+    subsectorReport: record.dataSource.subsectorReport,
+    quarterlyFinancials: record.dataSource.quarterlyFinancials,
+    stockSuspensions: record.dataSource.stockSuspensions,
+    corporateActions: record.dataSource.corporateActions,
+    topBuyersSellers: record.dataSource.topBuyersSellers,
+    dailyNetForeignInflow: record.dataSource.dailyNetForeignInflow,
+    historicalPriceSeries: record.dataSource.market?.historicalSeries ?? null,
+    companyName: record.dataSource.companyName || record.ticker,
+    companyProfile: {
+      overview: { description: record.dataSource.companyDescription || undefined },
+      description: record.dataSource.companyDescription || undefined,
+      sector: record.dataSource.sector ?? undefined,
+      subsector: record.dataSource.subsector ?? undefined,
+    },
+    forensics: snapshot.forensics
+      ? {
+          cfoToNi: {
+            status: snapshot.forensics.cfoToNi.status,
+            ratio: snapshot.forensics.cfoToNi.periods.at(-1)?.ratio,
+          },
+          receivablesDivergence: {
+            status: snapshot.forensics.receivablesDivergence.status,
+            ratio: snapshot.forensics.receivablesDivergence.ratio,
+          },
+        }
+      : undefined,
+    qualityScorecard: snapshot.qualityScorecard
+      ? {
+          score: record.dataSource.stockSuspensions?.suspended_last_12m
+            ? Math.max(0, snapshot.qualityScorecard.score - 10)
+            : snapshot.qualityScorecard.score,
+          grade: snapshot.qualityScorecard.grade,
+          receivablesDivergence: snapshot.qualityScorecard.receivablesDivergence,
+          dsoTrendDays: snapshot.qualityScorecard.dsoTrendDays,
+          cfoToNi: snapshot.qualityScorecard.periods.at(-1)?.cfoToNiRatio,
+        }
+      : undefined,
+    financialStatements: record.dataSource.statements?.map((s) => ({
+      periodEnd: s.periodEnd,
+      revenue: s.revenue.value,
+      netIncome: s.netIncome.value,
+      operatingCashFlow: s.operatingCashFlow.value,
+      accountsReceivable: s.accountsReceivable.value,
+    })),
+    dagTrace: snapshot.collected?.toolTrace ?? [],
+    retrievedAt: record.dataSource.retrievedAt || record.startedAt,
+  };
+}
+
+function toModelInputs(input: Partial<DcfInputs>): ResearchModelInputs | null {
+  if (input.forecastFcff === undefined || input.wacc === undefined || input.terminalGrowth === undefined || input.cash === undefined || input.totalDebt === undefined || input.minorityInterest === undefined || input.sharesOutstanding === undefined) {
+    return null;
+  }
+  return {
+    forecastFcff: input.forecastFcff,
+    wacc: input.wacc,
+    terminalGrowth: input.terminalGrowth,
+    cash: input.cash,
+    totalDebt: input.totalDebt,
+    minorityInterest: input.minorityInterest,
+    sharesOutstanding: input.sharesOutstanding,
   };
 }
 
@@ -252,8 +631,16 @@ function requireRun(id: string): ResearchRunRecord {
 
 export function domainErrorResponse(error: unknown): { status: number; payload: object } {
   if (error instanceof DomainError) {
-    const status = error.code === "PROVIDER_FAILURE" ? 503 : error.code === "UNSUPPORTED_SECTOR" ? 422 : 422;
+    let status = 422;
+    if (error.code === "PROVIDER_FAILURE") {
+      if (error.message.includes("401")) status = 401;
+      else if (error.message.includes("403")) status = 403;
+      else if (error.message.includes("429")) status = 429;
+      else status = 503;
+    } else if (error.code === "UNSUPPORTED_SECTOR") {
+      status = 422;
+    }
     return { status, payload: { code: error.code, message: error.message, recovery: error.recovery } };
   }
-  return { status: 500, payload: { code: "INTERNAL", message: "Unexpected internal error.", recovery: "Retry the research run." } };
+  return { status: 500, payload: { code: "INTERNAL", message: error instanceof Error ? error.message : "Unexpected internal error.", recovery: "Retry the research run." } };
 }

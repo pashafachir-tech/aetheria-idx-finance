@@ -30,6 +30,7 @@ describe("AKRA workflow E2E", () => {
       adapter.getCompanyProfile("AKRA"), adapter.getFinancialStatements("AKRA"), adapter.getDailyMarketData("AKRA"),
     ]);
     expect(company.data.coverage).toBe("supported");
+    expect(company.toolCall).toMatchObject({ operation: "getCompanyProfile", cacheStatus: "MISS" });
 
     const evidence = [company.evidence, history.evidence, snapshot.evidence];
     const memoWriter: MemoWriter = { writeMemo: vi.fn().mockResolvedValue({ narrative: "Evidence supports the selected facts.", selectedFactIds: ["cfo-to-ni", "fair-value"], citedEvidenceIds: evidence.map((item) => item.id) }) };
@@ -37,14 +38,16 @@ describe("AKRA workflow E2E", () => {
     await orchestrator.plan("AKRA");
     orchestrator.collect({
       forensicPeriods: history.data.annual.map((statement) => ({ periodEnd: statement.periodEnd, netIncome: statement.netIncome.value, operatingCashFlow: statement.operatingCashFlow.value, revenue: statement.revenue.value, accountsReceivable: statement.accountsReceivable.value })),
-      valuation: { forecastFcff: [2_500_000_000, 2_725_000_000, 2_950_000_000, 3_200_000_000, 3_450_000_000], wacc: 0.12, terminalGrowth: 0.04, cash: 4_100_000_000, totalDebt: 11_800_000_000, minorityInterest: 0, sharesOutstanding: snapshot.data.sharesOutstanding.value },
+      valuation: { forecastFcff: [2_500_000_000_000, 2_725_000_000_000, 2_950_000_000_000, 3_200_000_000_000, 3_450_000_000_000], wacc: 0.12, terminalGrowth: 0.04, cash: 4_100_000_000_000, totalDebt: 11_800_000_000_000, minorityInterest: 0, sharesOutstanding: snapshot.data.sharesOutstanding.value },
       evidence,
       suggestedHaircut: 0.15,
     });
+    orchestrator.audit();
     orchestrator.validate();
     orchestrator.runForensics();
     orchestrator.recordAnalystDecision({ action: "apply", finalHaircut: 0, rationale: "Receivables signal requires a conservative scenario." });
     orchestrator.value();
+    orchestrator.verify();
     await orchestrator.synthesize();
     const completed = orchestrator.completeExport();
     expect(completed.state).toBe("completed");
@@ -53,7 +56,7 @@ describe("AKRA workflow E2E", () => {
       ticker: "AKRA",
       financials: history.data.annual,
       market: snapshot.data,
-      assumptions: { forecastFcff: [2_500_000_000, 2_725_000_000, 2_950_000_000, 3_200_000_000, 3_450_000_000], wacc: 0.12, terminalGrowth: 0.04, taxRate: 0.22, haircut: completed.analystDecision!.finalHaircut, cash: 4_100_000_000, totalDebt: 11_800_000_000, minorityInterest: 0, sharesOutstanding: snapshot.data.sharesOutstanding.value },
+      assumptions: { forecastFcff: [2_500_000_000_000, 2_725_000_000_000, 2_950_000_000_000, 3_200_000_000_000, 3_450_000_000_000], wacc: 0.12, terminalGrowth: 0.04, taxRate: 0.22, haircut: completed.analystDecision!.finalHaircut, cash: 4_100_000_000_000, totalDebt: 11_800_000_000_000, minorityInterest: 0, sharesOutstanding: snapshot.data.sharesOutstanding.value },
       analystDecision: completed.analystDecision!,
       evidence,
       auditTrail: [{ timestamp: "2026-09-19T10:00:00.000Z", state: "completed", detail: "AKRA research workflow completed" }],

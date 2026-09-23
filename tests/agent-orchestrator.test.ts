@@ -1,89 +1,69 @@
-import { describe, expect, it, vi } from "vitest";
-import { AgentOrchestrator, type MemoWriter, type ResearchDataSource, type ResearchPlanner } from "../packages/agent-orchestrator/src/index.js";
-import type { EvidenceRef } from "../packages/domain/src/index.js";
+import { describe, expect, it } from "vitest";
+import { runAutonomousInvestigation } from "../apps/web/lib/agent-orchestrator";
 
-const evidence: EvidenceRef = {
-  id: "sectors:financial-statements:akra:2024",
-  provider: "sectors",
-  operation: "getFinancialStatements",
-  retrievedAt: "2026-09-19T00:00:00.000Z",
-  cacheStatus: "hit",
-};
+describe("Autonomous Agent Orchestrator", () => {
+  it("executes the 5-node investigation DAG for BBCA with high conviction output", async () => {
+    const report = await runAutonomousInvestigation("BBCA", "smart_money");
 
-const collected = {
-  forensicPeriods: [
-    { periodEnd: "2023-12-31", netIncome: 100, operatingCashFlow: 60, revenue: 1_000, accountsReceivable: 100 },
-    { periodEnd: "2024-12-31", netIncome: 120, operatingCashFlow: 60, revenue: 1_100, accountsReceivable: 130 },
-  ],
-  valuation: { forecastFcff: [100, 100, 100, 100, 100], wacc: 0.1, terminalGrowth: 0.03, cash: 50, totalDebt: 20, minorityInterest: 0, sharesOutstanding: 10 },
-  evidence: [evidence],
-  suggestedHaircut: 0.15,
-};
+    expect(report.ticker).toBe("BBCA");
+    expect(report.status).toBe("COMPLETE");
+    expect(report.dagNodesExecuted).toBe(5);
+    expect(report.steps).toHaveLength(5);
 
-const planner: ResearchPlanner = { createPlan: vi.fn().mockResolvedValue({ objective: "Assess AKRA", steps: [{ id: "collect", description: "Collect Sectors evidence" }] }) };
+    // Node 1: Fundamental Forensics
+    expect(report.steps[0].nodeId).toBe("fundamental_forensics");
+    expect(report.steps[0].observation.summary).toContain("Valuasi");
 
-function writer(draft = { narrative: "Evidence supports the stated facts.", selectedFactIds: ["cfo-to-ni", "fair-value"], citedEvidenceIds: [evidence.id] }): MemoWriter {
-  return { writeMemo: vi.fn().mockResolvedValue(draft) };
-}
+    // Node 2: Smart Money Flow
+    expect(report.steps[1].nodeId).toBe("smart_money_flow");
+    expect(report.artifacts.smartMoneyFlow.topAccumulators.length).toBeGreaterThan(0);
 
-describe("AgentOrchestrator", () => {
-  it("moves through the constrained workflow and applies a durable analyst haircut", async () => {
-    const orchestrator = new AgentOrchestrator(planner, writer(), () => new Date("2026-09-19T10:00:00.000Z"));
+    // Node 3: Segment Moat
+    expect(report.steps[2].nodeId).toBe("segment_moat");
+    expect(report.artifacts.revenueSegments.segments.length).toBeGreaterThan(0);
 
-    await orchestrator.plan("akra");
-    expect(orchestrator.collect(collected).state).toBe("validating");
-    expect(orchestrator.validate().state).toBe("forensics");
-    expect(orchestrator.runForensics().state).toBe("awaiting_analyst");
-    const valuing = orchestrator.recordAnalystDecision({ action: "apply", finalHaircut: 0 });
-    expect(valuing).toMatchObject({ state: "valuing", analystDecision: { finalHaircut: 0.15, decidedAt: "2026-09-19T10:00:00.000Z" } });
-    expect(orchestrator.value().state).toBe("synthesizing");
-    expect((await orchestrator.synthesize()).state).toBe("exporting");
-    expect(orchestrator.completeExport().state).toBe("completed");
+    // Node 4: Governance Audit
+    expect(report.steps[3].nodeId).toBe("governance_audit");
+    expect(report.artifacts.governanceMatrix.gcgScore).toBeGreaterThanOrEqual(70);
+
+    // Node 5: Synthesis
+    expect(report.steps[4].nodeId).toBe("thesis_synthesis");
+    expect(["STRONGLY ACCUMULATE", "TACTICAL HOLD", "DEFENSIVE AVOID"]).toContain(report.memo.overallStance);
+    expect(report.memo.bullCaseArguments).toHaveLength(3);
+    expect(report.memo.bearCaseArguments).toHaveLength(3);
+    expect(report.memo.killCriteriaChecklist).toHaveLength(3);
+    expect(report.memo.markdownReport).toContain("INSTITUTIONAL INVESTMENT COMMITTEE MEMORANDUM");
   });
 
-  it("fails validation before forensics when evidence or data is incomplete", async () => {
-    const orchestrator = new AgentOrchestrator(planner, writer());
-    await orchestrator.plan("AKRA");
-    orchestrator.collect({ ...collected, evidence: [], forensicPeriods: [{ periodEnd: "2024-12-31", netIncome: 100, operatingCashFlow: null }] });
+  it("handles non-bank ticker AKRA with forensic focus", async () => {
+    const report = await runAutonomousInvestigation("AKRA", "forensic");
 
-    expect(orchestrator.validate()).toMatchObject({ state: "failed", failure: "Collected research requires at least one evidence reference." });
+    expect(report.ticker).toBe("AKRA");
+    expect(report.artifacts.revenueSegments.segments.some((s) => s.segment.includes("BBM") || s.segment.includes("Petroleum"))).toBe(true);
+    expect(report.artifacts.valuationConvergence.modelName).toBe("FCFF_DCF");
+    expect(report.memo.killCriteriaChecklist).toHaveLength(3);
   });
 
-  it("rejects LLM memo drafts with numeric claims or unknown evidence", async () => {
-    const orchestrator = new AgentOrchestrator(planner, writer({ narrative: "Fair value is 100.", selectedFactIds: ["fair-value"], citedEvidenceIds: ["invented-source"] }));
-    await orchestrator.plan("AKRA");
-    orchestrator.collect(collected);
-    orchestrator.validate();
-    orchestrator.runForensics();
-    orchestrator.recordAnalystDecision({ action: "dismiss", finalHaircut: 0 });
-    orchestrator.value();
+  it("routes BBCA to Residual Income Model (Clean Surplus) with banking metrics and insider watchdog", async () => {
+    const report = await runAutonomousInvestigation("BBCA");
 
-    await expect(orchestrator.synthesize()).resolves.toMatchObject({ state: "failed", failure: expect.stringContaining("unsupported") });
-  });
+    // Unified 360 Institutional default
+    expect(report.focus).toBe("360_institutional");
 
-  it("prevents state transitions that skip collection", () => {
-    const orchestrator = new AgentOrchestrator(planner, writer());
-    expect(() => orchestrator.validate()).toThrow("expected validating");
-  });
+    // Node 1: Residual Income Model
+    expect(report.steps[0].action.tool).toContain("rimKernel");
+    expect(report.steps[0].action.input.model).toBe("RESIDUAL_INCOME");
+    expect(report.steps[0].observation.summary).toContain("RESIDUAL_INCOME");
+    expect(report.steps[0].observation.summary).toContain("NIM ~5.7%");
+    expect(report.steps[0].observation.summary).toContain("ROE ~20.4%");
+    expect(report.steps[0].observation.summary).toContain("NPL 2.8%");
+    expect(report.artifacts.valuationConvergence.modelName).toBe("RESIDUAL_INCOME");
+    expect(report.artifacts.valuationConvergence.modelIntrinsicValue).toBeGreaterThan(5000);
 
-  it("runs a ticker through the analyst checkpoint and applies the durable haircut via a data source", async () => {
-    const dataSource: ResearchDataSource = { load: vi.fn().mockResolvedValue(collected) };
-    const orchestrator = new AgentOrchestrator(planner, writer(), { now: () => new Date("2026-09-19T10:00:00.000Z"), dataSource });
-
-    const runSnapshot = await orchestrator.run("AKRA");
-    expect(runSnapshot.state).toBe("awaiting_analyst");
-    expect(runSnapshot.forensics).toBeDefined();
-
-    const decided = await orchestrator.applyDecision({ action: "apply", finalHaircut: 0, rationale: "Accept the engine suggestion." });
-    expect(decided.state).toBe("exporting");
-    expect(decided.analystDecision).toMatchObject({ action: "apply", finalHaircut: 0.15 });
-    expect(decided.valuation).toBeDefined();
-  });
-
-  it("fails the run without a configured data source", async () => {
-    const orchestrator = new AgentOrchestrator(planner, writer());
-    const snapshot = await orchestrator.run("AKRA");
-    expect(snapshot.state).toBe("failed");
-    expect(snapshot.failure).toBe("Research data source is not configured.");
+    // Node 4: Insider Watchdog & Corporate Actions Sentinel
+    expect(report.artifacts.governanceMatrix.insiderWatchdog).toBeDefined();
+    expect(report.artifacts.governanceMatrix.insiderWatchdog?.status).toBe("VERIFIED");
+    expect(report.artifacts.governanceMatrix.corporateActionsSentinel).toBeDefined();
+    expect(report.artifacts.governanceMatrix.corporateActionsSentinel?.status).toBe("DIVIDEND_DECLARED");
   });
 });

@@ -1,0 +1,10 @@
+{
+  "data": {
+    "subsector": "Banking",
+    "companies": [
+      { "symbol": "BBRI", "company_name": "PT Bank Rakyat Indonesia (Persero) Tbk", "market_cap": 684780000000000 },
+      { "symbol": "BMRI", "company_name": "PT Bank Mandiri (Persero) Tbk", "market_cap": 606000000000000 },
+      { "symbol": "BBCA", "company_name": "PT Bank Central Asia Tbk", "market_cap": 1120000000000000 }
+    ]
+  }
+}

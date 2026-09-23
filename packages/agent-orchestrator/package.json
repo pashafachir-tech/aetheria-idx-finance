@@ -1,5 +1,8 @@
 {
   "name": "@aetheria/agent-orchestrator",
   "private": true,
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
 }

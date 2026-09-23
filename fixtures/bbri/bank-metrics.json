@@ -1,0 +1,14 @@
+{
+  "data": {
+    "symbol": "BBRI",
+    "period_end": "2024-12-31",
+    "currency": "IDR",
+    "book_value_per_share": 2400,
+    "roe": 0.18,
+    "cost_of_equity": 0.1,
+    "dividend_per_share": 300,
+    "payout_ratio": 0.6,
+    "net_interest_margin": 0.075,
+    "non_performing_loan": 0.028
+  }
+}

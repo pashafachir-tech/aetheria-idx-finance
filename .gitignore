@@ -3,7 +3,14 @@ node_modules/
 dist/
 coverage/
 .cache/
+**/.cache/
 .next/
+.turbo/
 .env
 .env.*
+.env.local
 !.env.example
+*.xlsx
+*.tmp
+*.log
+

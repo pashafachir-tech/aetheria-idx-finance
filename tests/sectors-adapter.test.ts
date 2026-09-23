@@ -30,6 +30,7 @@ describe("SectorsAdapter", () => {
     expect(result.data.name.value).toBe("PT AKR Corporindo Tbk");
     expect(result.evidence).toMatchObject({ provider: "sectors", operation: "getCompanyProfile", cacheStatus: "miss" });
     expect(result.data.sector.evidence.sourceField).toBe("data.sector");
+    expect(result.toolCall).toMatchObject({ operation: "getCompanyProfile", cacheStatus: "MISS" });
   });
 
   it("preserves financial source currency, period, and numeric precision", async () => {
@@ -38,7 +39,7 @@ describe("SectorsAdapter", () => {
     const latest = result.data.annual[1];
 
     expect(latest.periodEnd).toBe("2024-12-31");
-    expect(latest.revenue).toMatchObject({ value: 46750000000.75, sourceCurrency: "IDR", periodEnd: "2024-12-31", originalPrecision: 2 });
+    expect(latest.revenue).toMatchObject({ value: 46750000000750, sourceCurrency: "IDR", periodEnd: "2024-12-31", originalPrecision: 0 });
     expect(latest.operatingCashFlow.evidence.reportingPeriod).toBe("2024-12-31");
   });
 
@@ -51,6 +52,7 @@ describe("SectorsAdapter", () => {
 
     expect(client.getDailyMarketData).toHaveBeenCalledTimes(1);
     expect(cached.evidence.cacheStatus).toBe("hit");
+    expect(cached.toolCall.cacheStatus).toBe("HIT");
     expect(cached.data.lastPrice.value).toBe(1525.5);
   });
 
@@ -61,6 +63,21 @@ describe("SectorsAdapter", () => {
     expect(result.data.subsector).toBe("Oil, Gas & Coal");
     expect(result.data.companies[1].ticker.value).toBe("PGAS");
     expect(result.data.companies[0].marketCapitalization.evidence.provider).toBe("sectors");
+  });
+
+  it("maps bank metrics for financial-sector issuers", async () => {
+    const client = fixtureClient();
+    client.getFinancialMetrics = vi.fn().mockResolvedValue({
+      data: { symbol: "BBRI", period_end: "2024-12-31", book_value_per_share: 2400, roe: 0.18, cost_of_equity: 0.1, dividend_per_share: 300, payout_ratio: 0.6, net_interest_margin: 0.075, non_performing_loan: 0.028 },
+    });
+    const adapter = new SectorsAdapter(client, memoryCache());
+    const result = await adapter.getFinancialMetrics("BBRI");
+
+    expect(result.data.bookValuePerShare.value).toBe(2400);
+    expect(result.data.roe.value).toBeCloseTo(0.18, 6);
+    expect(result.data.netInterestMargin.value).toBeCloseTo(0.075, 6);
+    expect(result.data.nonPerformingLoan.value).toBeCloseTo(0.028, 6);
+    expect(result.toolCall).toMatchObject({ operation: "getFinancialMetrics", cacheStatus: "MISS" });
   });
 
   it("rejects missing financial fields instead of replacing them with zero", async () => {
