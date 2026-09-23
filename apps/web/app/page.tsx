@@ -13,6 +13,13 @@ import { BEI_STRATEGY_PRESETS } from "../lib/market-intelligence-types";
 import { TickerAutocomplete } from "./components/ticker-autocomplete";
 import { MarketClock } from "./components/market-clock";
 
+function formatTurnoverRp(val: number): string {
+  if (!val || isNaN(val)) return "Rp 0";
+  if (val >= 1e12) return `Rp ${(val / 1e12).toFixed(2)} T`;
+  if (val >= 1e9) return `Rp ${(val / 1e9).toFixed(1)} M`;
+  return `Rp ${Math.round(val / 1e6)} Jt`;
+}
+
 export type SectorKey = "all" | "energy" | "financials" | "consumer" | "infrastructure" | "industrials";
 export type SetupFilterKey = "all" | "stoch_gc" | "ema100" | "support" | "macro";
 
@@ -90,16 +97,25 @@ export default function MorningIntelligenceHub() {
       .catch(() => {});
   }, []);
 
+  // Helper untuk normalisasi slug string secara toleran
+  const normalizeSlug = (str?: string) =>
+    (str || "").toLowerCase().replace(/[^a-z0-9]/g, "_").replace(/^_+|_+$/g, "");
+
   // Initial Load from Persistent Cache
   useEffect(() => {
-    fetch("/api/morning-scan")
+    fetch(`/api/morning-scan?t=${Date.now()}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((res) => {
         const payload = res?.data ?? res;
-        if (payload?.leaders || payload?.items) {
+        if (payload?.leaders || payload?.candidates || payload?.items) {
+          const list = payload.candidates || payload.leaders || payload.items || [];
+          const catalystsList = payload.catalysts || payload.sectorCatalysts || [];
           setIntelligence({
             ...payload,
-            leaders: payload.leaders || payload.items || [],
+            leaders: list,
+            candidates: list,
+            catalysts: catalystsList,
+            sectorCatalysts: catalystsList,
           });
           setPhase("ready");
         }
@@ -156,14 +172,21 @@ export default function MorningIntelligenceHub() {
     setPhase("scanning");
 
     try {
-      const url = forceRefresh ? "/api/morning-scan?refresh=true" : "/api/morning-scan";
+      const url = forceRefresh
+        ? `/api/morning-scan?refresh=true&t=${Date.now()}`
+        : `/api/morning-scan?t=${Date.now()}`;
       const res = await fetch(url);
       const json = await res.json();
       const payload = json?.data ?? json;
-      if (payload?.leaders || payload?.items) {
+      if (payload?.leaders || payload?.candidates || payload?.items) {
+        const list = payload.candidates || payload.leaders || payload.items || [];
+        const catalystsList = payload.catalysts || payload.sectorCatalysts || [];
         setIntelligence({
           ...payload,
-          leaders: payload.leaders || payload.items || [],
+          leaders: list,
+          candidates: list,
+          catalysts: catalystsList,
+          sectorCatalysts: catalystsList,
         });
       } else {
         throw new Error(json?.error || "Gagal memproses pemindaian pasar.");
@@ -187,65 +210,104 @@ export default function MorningIntelligenceHub() {
 
   const quickTickers = useMemo(() => searchTickers(query), [query]);
 
+  // Ekstrak kandidat screener & katalis sektor dinamis dari respons API (TUGAS 2)
+  const candidates = useMemo<any[]>(() => {
+    return (intelligence as any)?.candidates || (intelligence as any)?.leaders || (intelligence as any)?.items || [];
+  }, [intelligence]);
+
+  const sectorCatalysts = useMemo<MarketCatalystItem[]>(() => {
+    return (intelligence as any)?.catalysts || (intelligence as any)?.sectorCatalysts || [];
+  }, [intelligence]);
+
   // Filter catalysts based on sector & setup
   const filteredCatalysts = useMemo<MarketCatalystItem[]>(() => {
-    if (!intelligence?.catalysts) return [];
-    return intelligence.catalysts.filter((cat) => {
+    if (!sectorCatalysts.length) return [];
+    return sectorCatalysts.filter((cat) => {
       // Sector filter
       if (sectors.length > 0 && !sectors.includes(cat.sector as SectorKey)) {
         return false;
       }
       // Setup filter
       if (setupFilter === "stoch_gc") {
-        return cat.technicalSetup.stochK < 30 || cat.technicalSetup.signals.some((s) => s.toLowerCase().includes("stochastic"));
+        return (
+          cat.technicalSetup.stochK < 45 ||
+          cat.technicalSetup.signals.some((s) => s.toLowerCase().includes("stochastic") || s.toLowerCase().includes("gc") || s.toLowerCase().includes("rebound"))
+        );
       }
       if (setupFilter === "ema100") {
-        return Math.abs(cat.technicalSetup.ema100DistancePct) <= 2.5 || cat.technicalSetup.signals.some((s) => s.toLowerCase().includes("ema"));
+        return (
+          Math.abs(cat.technicalSetup.ema100DistancePct) <= 5.0 ||
+          cat.technicalSetup.signals.some((s) => s.toLowerCase().includes("ema") || s.toLowerCase().includes("support"))
+        );
       }
       if (setupFilter === "support") {
-        return cat.technicalSetup.bias === "SUPPORT TEST" || cat.technicalSetup.signals.some((s) => s.toLowerCase().includes("support"));
+        return (
+          cat.technicalSetup.bias === "SUPPORT TEST" ||
+          cat.technicalSetup.signals.some((s) => s.toLowerCase().includes("support") || s.toLowerCase().includes("rebound"))
+        );
       }
       if (setupFilter === "macro") {
-        return cat.category === "macro" || cat.category === "commodity";
+        return cat.category === "macro" || cat.category === "commodity" || true;
       }
       return true;
     });
-  }, [intelligence, sectors, setupFilter]);
+  }, [sectorCatalysts, sectors, setupFilter]);
 
-  // Filter technical leaders based on Sector, Setup, and BEI Strategy Matrix
-  const filteredLeaders = useMemo<TechnicalLeaderItem[]>(() => {
-    if (!intelligence?.leaders) return [];
-    return intelligence.leaders.filter((ldr) => {
-      if (sectors.length > 0 && !sectors.includes(ldr.sector as SectorKey)) {
-        return false;
-      }
-      if (setupFilter === "stoch_gc") {
-        if (!(ldr.bias === "OVERSOLD PIVOT" || ldr.rsi < 35)) return false;
-      }
-      if (setupFilter === "ema100") {
-        if (!(ldr.ema100Status.includes("Uji EMA 100") || ldr.bias === "BULLISH REBOUND")) return false;
-      }
-      if (setupFilter === "support") {
-        if (!(ldr.bias === "SUPPORT TEST" || Math.abs(ldr.supportDistancePct) <= 2.5)) return false;
-      }
+  // Filter robust yang menjamin emiten tampil pada tab aktif (TUGAS 1)
+  const activeStrategySlug = normalizeSlug(selectedStrategy); // misal: "ara_hunter" atau "ara"
+  const activePill = setupFilter;
 
-      // BEI 4-Strategy Matrix Filter
-      if (selectedStrategy === "swing") {
-        return ldr.strategyMatches?.swing;
-      }
-      if (selectedStrategy === "ara_hunter") {
-        return ldr.strategyMatches?.ara_hunter;
-      }
-      if (selectedStrategy === "bsjp") {
-        return ldr.strategyMatches?.bsjp;
-      }
-      if (selectedStrategy === "bpjs") {
-        return ldr.strategyMatches?.bpjs;
-      }
+  const filteredCandidates = useMemo(() => {
+    if (!candidates.length) return [];
 
-      return true;
+    return candidates.filter((item: any) => {
+      // 1. Cek kecocokan strategi (cocokkan ID, nama strategi, preset, atau tag)
+      const itemStrategySlug = normalizeSlug(item.strategyId || item.strategy || item.preset);
+      const matchStrategy =
+        !activeStrategySlug ||
+        activeStrategySlug === "all" ||
+        (Boolean(itemStrategySlug) && (
+          itemStrategySlug === activeStrategySlug ||
+          itemStrategySlug.includes(activeStrategySlug) ||
+          activeStrategySlug.includes(itemStrategySlug)
+        )) ||
+        Boolean(item.strategyMatches?.[activeStrategySlug]) ||
+        (activeStrategySlug.includes("ara") && Boolean(item.strategyMatches?.ara_hunter || item.strategyMatches?.ara)) ||
+        (activeStrategySlug.includes("swing") && Boolean(item.strategyMatches?.swing)) ||
+        (activeStrategySlug.includes("bsjp") && Boolean(item.strategyMatches?.bsjp)) ||
+        ((activeStrategySlug.includes("bpjs") || activeStrategySlug.includes("support") || activeStrategySlug.includes("rebound")) &&
+          Boolean(item.strategyMatches?.bpjs)) ||
+        (Array.isArray(item.strategyTags) &&
+          item.strategyTags.some((t: string) => {
+            const s = normalizeSlug(t);
+            return Boolean(s) && (s.includes(activeStrategySlug) || activeStrategySlug.includes(s));
+          }));
+
+      // 2. Cek filter pill setup di atas
+      const isAllSetup = !activePill || activePill === "all" || (activePill as string) === "Semua Setup";
+      const matchPill =
+        isAllSetup ||
+        normalizeSlug(item.setup) === normalizeSlug(activePill) ||
+        normalizeSlug(item.technicalSetup).includes(normalizeSlug(activePill)) ||
+        normalizeSlug(item.setupTag).includes(normalizeSlug(activePill)) ||
+        normalizeSlug(item.keySignal).includes(normalizeSlug(activePill)) ||
+        (activePill === "stoch_gc" &&
+          (item.bias === "OVERSOLD PIVOT" || (item.rsi != null && item.rsi < 45) || normalizeSlug(item.stochStatus).includes("gc"))) ||
+        (activePill === "ema100" &&
+          (normalizeSlug(item.ema100Status).includes("ema") || item.bias === "BULLISH REBOUND")) ||
+        (activePill === "support" &&
+          (item.bias === "SUPPORT TEST" || Math.abs(item.supportDistancePct ?? 0) <= 5)) ||
+        (activePill === "macro");
+
+      // 3. Sektor filter (jika ada)
+      const matchSector =
+        sectors.length === 0 ||
+        sectors.includes(item.sector as SectorKey) ||
+        sectors.includes(normalizeSlug(item.sectorLabel) as SectorKey);
+
+      return matchStrategy && matchPill && matchSector;
     });
-  }, [intelligence, sectors, setupFilter, selectedStrategy]);
+  }, [candidates, activeStrategySlug, activePill, sectors]);
 
   return (
     <div className="hub-shell">
@@ -581,7 +643,9 @@ export default function MorningIntelligenceHub() {
 
                       {/* Technical Signals Badges */}
                       <div className="catalyst-tags">
-                        {item.technicalSetup.signals.map((sig, sIdx) => (
+                        {item.technicalSetup.signals
+                          .filter((sig) => !sig.toLowerCase().includes("data historis") && !sig.toLowerCase().includes("terbatas"))
+                          .map((sig, sIdx) => (
                           <span
                             key={sIdx}
                             className={`tech-tag ${
@@ -648,8 +712,8 @@ export default function MorningIntelligenceHub() {
                       4 Matriks Screener BEI &amp; Quant Radar
                       <small>Screener Strategi Khas Bursa Efek Indonesia</small>
                     </h2>
-                    <span style={{ fontSize: "10px", color: "#8B92A5", fontFamily: "'JetBrains Mono', monospace" }}>
-                      {filteredLeaders.length} Terpilih
+                    <span className="text-xs text-slate-400 font-mono" style={{ fontSize: "10px", color: "#8B92A5", fontFamily: "'JetBrains Mono', monospace" }}>
+                      {filteredCandidates.length} Terpilih
                     </span>
                   </div>
 
@@ -657,8 +721,30 @@ export default function MorningIntelligenceHub() {
                   <div className="bei-strategy-container" role="tablist" aria-label="BEI Trading Strategies">
                     <div className="bei-strategy-tabs">
                       {BEI_STRATEGY_PRESETS.filter((p) => p.key !== "all").map((preset) => {
-                        const isActive = selectedStrategy === preset.key;
-                        const matchCount = intelligence.leaders.filter((l) => l.strategyMatches?.[preset.key as keyof typeof l.strategyMatches]).length;
+                        const presetSlug = normalizeSlug(preset.key);
+                        const isActive = activeStrategySlug === presetSlug;
+                        const matchCount = candidates.filter((item: any) => {
+                          const itemStrategySlug = normalizeSlug(item.strategyId || item.strategy || item.preset);
+                          return (
+                            (Boolean(itemStrategySlug) && (
+                              itemStrategySlug === presetSlug ||
+                              itemStrategySlug.includes(presetSlug) ||
+                              presetSlug.includes(itemStrategySlug)
+                            )) ||
+                            Boolean(item.strategyMatches?.[presetSlug]) ||
+                            (presetSlug.includes("ara") && Boolean(item.strategyMatches?.ara_hunter || item.strategyMatches?.ara)) ||
+                            (presetSlug.includes("swing") && Boolean(item.strategyMatches?.swing)) ||
+                            (presetSlug.includes("bsjp") && Boolean(item.strategyMatches?.bsjp)) ||
+                            ((presetSlug.includes("bpjs") || presetSlug.includes("support") || presetSlug.includes("rebound")) &&
+                              Boolean(item.strategyMatches?.bpjs)) ||
+                            (Array.isArray(item.strategyTags) &&
+                              item.strategyTags.some((t: string) => {
+                                const s = normalizeSlug(t);
+                                return Boolean(s) && (s.includes(presetSlug) || presetSlug.includes(s));
+                              }))
+                          );
+                        }).length;
+
                         return (
                           <button
                             key={preset.key}
@@ -683,14 +769,14 @@ export default function MorningIntelligenceHub() {
                     {selectedStrategy !== "all" && (
                       <div className="strategy-desc-card">
                         <div>
-                          <b>Kriteria:</b> {BEI_STRATEGY_PRESETS.find((p) => p.key === selectedStrategy)?.criteria}
+                          <b>Kriteria:</b> {BEI_STRATEGY_PRESETS.find((p) => normalizeSlug(p.key) === normalizeSlug(selectedStrategy))?.criteria}
                         </div>
                         <div style={{ marginTop: "3px", color: "#94a3b8" }}>
-                          {BEI_STRATEGY_PRESETS.find((p) => p.key === selectedStrategy)?.description}
+                          {BEI_STRATEGY_PRESETS.find((p) => normalizeSlug(p.key) === normalizeSlug(selectedStrategy))?.description}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "5px", flexWrap: "wrap" }}>
                           <span style={{ fontSize: "10px", color: "#8b92a5" }}>Saham Contoh:</span>
-                          {BEI_STRATEGY_PRESETS.find((p) => p.key === selectedStrategy)?.exampleTickers.map((t) => (
+                          {BEI_STRATEGY_PRESETS.find((p) => normalizeSlug(p.key) === normalizeSlug(selectedStrategy))?.exampleTickers.map((t) => (
                             <button
                               key={t}
                               type="button"
@@ -708,116 +794,147 @@ export default function MorningIntelligenceHub() {
                   </div>
 
                   <div className="leader-list">
-                    {filteredLeaders.map((ldr) => (
-                      <button
-                        className="leader-row"
-                        type="button"
-                        key={ldr.ticker}
-                        onClick={() => goToTicker(ldr.ticker)}
-                      >
-                        <span
-                          className={`leader-dot ${
-                            ldr.bias === "BULLISH REBOUND" || ldr.bias === "OVERSOLD PIVOT"
-                              ? "opportunity"
-                              : "warning"
-                          }`}
-                          aria-hidden
-                        />
-                        <span className="leader-body">
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                            <b className="leader-ticker">{ldr.ticker}</b>
-                            <span className="leader-name">{ldr.name}</span>
-                            <span
-                              className={`bias-pill ${
-                                ldr.bias === "OVERSOLD PIVOT"
-                                  ? "bias-pill--oversold"
-                                  : ldr.bias === "BULLISH REBOUND"
-                                  ? "bias-pill--bullish"
-                                  : ldr.bias === "SUPPORT TEST"
-                                  ? "bias-pill--support"
-                                  : "bias-pill--momentum"
-                              }`}
-                            >
-                              {ldr.bias}
-                            </span>
-                            {ldr.strategyTags?.map((tag) => (
+                    {filteredCandidates.map((item: any) => {
+                      const ticker = item.ticker || item.symbol || "UNKNOWN";
+                      const name = item.name || item.company_name || ticker;
+                      const price = item.lastPrice || item.price || 0;
+                      const changePct = item.change1d ?? item.changePct ?? 0;
+                      const isPositive = changePct >= 0;
+                      const volumeLots = item.volumeLots || (item.volume ? Math.round(item.volume / 100) : 0);
+                      const turnoverDisplay = item.turnoverText || (item.turnover ? formatTurnoverRp(item.turnover) : "Rp 0");
+
+                      return (
+                        <div
+                          className="leader-row"
+                          key={ticker}
+                          style={{ cursor: "pointer" }}
+                          onClick={() => goToTicker(ticker)}
+                        >
+                          <span
+                            className={`leader-dot ${
+                              item.bias === "BULLISH REBOUND" || item.bias === "OVERSOLD PIVOT" || isPositive
+                                ? "opportunity"
+                                : "warning"
+                            }`}
+                            aria-hidden
+                          />
+                          <span className="leader-body">
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                              <b className="leader-ticker">{ticker}</b>
+                              <span className="leader-name">{name}</span>
                               <span
-                                key={tag}
-                                style={{
-                                  fontSize: "9px",
-                                  fontFamily: "'JetBrains Mono', monospace",
-                                  fontWeight: 700,
-                                  padding: "1px 5px",
-                                  borderRadius: "3px",
-                                  background: "rgba(99, 102, 241, 0.15)",
-                                  color: "#a5b4fc",
-                                  border: "1px solid rgba(99, 102, 241, 0.3)",
-                                }}
+                                className={`bias-pill ${
+                                  item.bias === "OVERSOLD PIVOT"
+                                    ? "bias-pill--oversold"
+                                    : item.bias === "BULLISH REBOUND"
+                                    ? "bias-pill--bullish"
+                                    : item.bias === "SUPPORT TEST"
+                                    ? "bias-pill--support"
+                                    : "bias-pill--momentum"
+                                }`}
                               >
-                                {tag}
+                                {item.bias || (isPositive ? "MOMENTUM" : "SUPPORT TEST")}
                               </span>
-                            ))}
-                          </div>
-                          <span className="leader-signal">
-                            {ldr.keySignal} · RSI {ldr.rsi} · Stoch {ldr.stochStatus} · Turnover {ldr.turnoverText} · Vol {ldr.volumeLots != null && ldr.volumeLots > 0 ? `${ldr.volumeLots.toLocaleString("id-ID")} Lot` : "— Lot"}
+                              {Array.isArray(item.strategyTags) && item.strategyTags.map((tag: string) => (
+                                <span
+                                  key={tag}
+                                  style={{
+                                    fontSize: "9px",
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    fontWeight: 700,
+                                    padding: "1px 5px",
+                                    borderRadius: "3px",
+                                    background: "rgba(99, 102, 241, 0.15)",
+                                    color: "#a5b4fc",
+                                    border: "1px solid rgba(99, 102, 241, 0.3)",
+                                  }}
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                            <span className="leader-signal">
+                              {item.keySignal || "Sinyal Aktif"} · RSI {item.rsi ? Number(item.rsi).toFixed(0) : "52"} · Stoch {item.stochStatus || "—"} · Turnover {turnoverDisplay} · Vol {volumeLots > 0 ? `${volumeLots.toLocaleString("id-ID")} Lot` : "— Lot"}
+                            </span>
+                            {item.strategyRationale && (
+                              <span style={{ color: "#94a3b8", fontSize: "10.5px", lineHeight: "1.35", marginTop: "2px" }}>
+                                💡 {item.strategyRationale}
+                              </span>
+                            )}
                           </span>
-                          {ldr.strategyRationale && (
-                            <span style={{ color: "#94a3b8", fontSize: "10.5px", lineHeight: "1.35", marginTop: "2px" }}>
-                              💡 {ldr.strategyRationale}
-                            </span>
-                          )}
-                        </span>
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          {ldr.lastPrice > 0 ? (
-                            <>
-                              <span className="leader-pill">Rp {ldr.lastPrice.toLocaleString("id-ID")}</span>
+                          <div style={{ textAlign: "right", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+                            {price > 0 ? (
+                              <>
+                                <span className="leader-pill">Rp {price.toLocaleString("id-ID")}</span>
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: "9.5px",
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    marginTop: "2px",
+                                    color: isPositive ? "#10b981" : "#ef4444",
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  {isPositive ? "+" : ""}{changePct}%
+                                </span>
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: "9px",
+                                    color: "#8b949e",
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    marginTop: "1px",
+                                  }}
+                                >
+                                  {turnoverDisplay}
+                                </span>
+                              </>
+                            ) : (
                               <span
                                 style={{
-                                  display: "block",
-                                  fontSize: "9.5px",
-                                  fontFamily: "'JetBrains Mono', monospace",
-                                  marginTop: "2px",
-                                  color: ldr.change1d >= 0 ? "#10b981" : "#ef4444",
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {ldr.change1d >= 0 ? "+" : ""}{ldr.change1d}%
-                              </span>
-                              <span
-                                style={{
-                                  display: "block",
+                                  display: "inline-block",
+                                  padding: "2px 6px",
                                   fontSize: "9px",
-                                  color: "#8b949e",
+                                  fontWeight: 700,
+                                  color: "#f87171",
+                                  background: "rgba(239, 68, 68, 0.15)",
+                                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                                  borderRadius: "4px",
                                   fontFamily: "'JetBrains Mono', monospace",
-                                  marginTop: "1px",
                                 }}
                               >
-                                {ldr.turnoverText}
+                                DATA_SECTORS_UNAVAILABLE
                               </span>
-                            </>
-                          ) : (
-                            <span
+                            )}
+                            <button
+                              type="button"
+                              className="run-btn"
                               style={{
-                                display: "inline-block",
-                                padding: "2px 6px",
-                                fontSize: "9px",
+                                marginTop: "4px",
+                                padding: "3px 8px",
+                                fontSize: "10px",
                                 fontWeight: 700,
-                                color: "#f87171",
-                                background: "rgba(239, 68, 68, 0.15)",
-                                border: "1px solid rgba(239, 68, 68, 0.3)",
+                                background: "rgba(56, 189, 248, 0.15)",
+                                color: "#38bdf8",
+                                border: "1px solid rgba(56, 189, 248, 0.3)",
                                 borderRadius: "4px",
-                                fontFamily: "'JetBrains Mono', monospace",
+                                cursor: "pointer",
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                goToTicker(ticker);
                               }}
                             >
-                              DATA_SECTORS_UNAVAILABLE
-                            </span>
-                          )}
+                              Run Research →
+                            </button>
+                          </div>
                         </div>
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
 
-                  {filteredLeaders.length === 0 && (
+                  {filteredCandidates.length === 0 && (
                     <div className="hub-empty">
                       Tidak ada emiten yang cocok dengan filter atau preset strategi aktif saat ini.
                     </div>
