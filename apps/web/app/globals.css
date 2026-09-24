@@ -1235,7 +1235,9 @@ main { min-height: 100vh; }.hero, .action-row, .workspace, .disclaimer { max-wid
   gap: 16px;
   min-height: auto;
   height: auto;
-  overflow: visible;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   animation: wbFadeIn 0.15s ease-out;
 }
 
@@ -1471,6 +1473,8 @@ main { min-height: 100vh; }.hero, .action-row, .workspace, .disclaimer { max-wid
   border: 1px solid var(--wb-border);
   border-radius: 5px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 9999;
 }
 
 .wb-tooltip__label {
@@ -2997,7 +3001,7 @@ main { min-height: 100vh; }.hero, .action-row, .workspace, .disclaimer { max-wid
   }
 }
 
-/* ── §50 Morgan Stanley / Bloomberg Institutional Print Layout ── */
+/* ── §50 Aetheria Institutional Print Layout ── */
 @media print {
   /* Hide interactive terminal controls */
   .wb-header__actions,

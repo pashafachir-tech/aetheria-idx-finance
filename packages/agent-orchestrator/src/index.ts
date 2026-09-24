@@ -111,7 +111,7 @@ export interface ResearchMemo {
   narrative: string;
   facts: MemoFact[];
   citedEvidenceIds: string[];
-  disclaimer: "For research and educational use only. Not investment advice.";
+  disclaimer: "For research and institutional decision-support only. Not financial or investment advice. Core market data sourced from Sectors API v2.";
 }
 
 export type ConfidenceLevel = "high" | "medium" | "low";
@@ -190,7 +190,7 @@ export function evaluateEvidenceSufficiency(evidence: EvidenceRef[], context: Ev
   return { score, periodCoverage, itemCoverage, freshness, missing };
 }
 
-const disclaimer = "For research and educational use only. Not investment advice." as const;
+const disclaimer = "For research and institutional decision-support only. Not financial or investment advice. Core market data sourced from Sectors API v2." as const;
 
 export class AgentOrchestrator {
   private snapshot: ResearchSnapshot = { state: "planning" };

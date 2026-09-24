@@ -342,7 +342,7 @@ export default function MorningIntelligenceHub() {
         </div>
       </header>
 
-      {/* ═══════ MACRO TICKER BAR (INFINITE SMOOTH MARQUEE - BLOOMBERG STYLE) ═══════ */}
+      {/* ═══════ MACRO TICKER BAR (INFINITE SMOOTH MARQUEE - INSTITUTIONAL RADAR) ═══════ */}
       <section
         className="wb-ticker-tape"
         aria-label="IHSG Macro Aggregate Telemetry"
@@ -987,7 +987,7 @@ export default function MorningIntelligenceHub() {
         {/* ═══════ FOOTER ═══════ */}
         <footer className="hub-footer">
           <span className="footer-disclaimer">
-            For institutional quantitative research and educational use only. Zero-LLM Math Kernel Active.
+            For research and institutional decision-support only. Not financial or investment advice. Core market data sourced from Sectors API v2.
           </span>
           <span className="footer-build">
             Aetheria Engine v2.4.0-idx | Sectors API v2 Gateway | 12h Persistent Intelligence Cache

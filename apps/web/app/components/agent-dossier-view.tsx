@@ -169,7 +169,32 @@ export function AgentDossierView({
                 color: "#A5B4FC",
               }}
             >
-              AUTONOMOUS 360° INSTITUTIONAL DUE DILIGENCE
+              AETHERIA AUTONOMOUS REACT RESEARCH AGENT
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "rgba(16, 185, 129, 0.12)",
+              border: "1px solid rgba(16, 185, 129, 0.4)",
+              borderRadius: "6px",
+              padding: "7px 12px",
+            }}
+          >
+            <span style={{ fontSize: "11px" }}>🏆</span>
+            <span
+              style={{
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: "10.5px",
+                fontWeight: 700,
+                letterSpacing: "0.05em",
+                color: "#34D399",
+              }}
+            >
+              TRACK 01: AI AGENTS &amp; ASSISTANTS
             </span>
           </div>
 
@@ -197,6 +222,158 @@ export function AgentDossierView({
         </div>
       </section>
 
+      {/* ═══════════════════════════════════════════════════════════════════
+          TRACK 01: MULTI-STEP REACT PIPELINE & TELEMETRY DASHBOARD
+         ═══════════════════════════════════════════════════════════════════ */}
+      <section
+        style={{
+          background: "#0C1019",
+          border: "1px solid #1E293B",
+          borderRadius: "8px",
+          padding: "14px 18px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          boxShadow: "0 6px 20px rgba(0, 0, 0, 0.35)",
+        }}
+      >
+        {/* Top: 5-Node DAG Flow Steps Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "10.5px",
+              fontWeight: 800,
+              letterSpacing: "0.08em",
+              color: "#818CF8",
+              textTransform: "uppercase",
+            }}
+          >
+            Autonomous ReAct Execution Flow (Deterministic 5-Node DAG)
+          </span>
+          <span
+            style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "10px",
+              color: "#64748B",
+            }}
+          >
+            Sectors Hackathon 2026 · Track 01 Qualified
+          </span>
+        </div>
+
+        {/* Visual Flow Nodes */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+            gap: "8px",
+            alignItems: "center",
+          }}
+        >
+          {[
+            { step: "01", label: "Goal: Audit Forensik & Valuasi", icon: "🎯", color: "#38BDF8" },
+            { step: "02", label: "Plan: 5-Node DAG", icon: "🗺️", color: "#818CF8" },
+            { step: "03", label: "Tool Execution: Sectors API v2", icon: "⚡", color: "#10B981" },
+            { step: "04", label: "Observe: Anomaly Detection", icon: "🔍", color: "#F59E0B" },
+            { step: "05", label: "Synthesize: Bull/Bear & Kill Criteria", icon: "⚖️", color: "#A855F7" },
+          ].map((item) => (
+            <div
+              key={item.step}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                background: "rgba(255, 255, 255, 0.03)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: "6px",
+                padding: "8px 10px",
+                minWidth: 0,
+              }}
+            >
+              <span style={{ fontSize: "14px" }}>{item.icon}</span>
+              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "9px", color: item.color, fontWeight: 700 }}>
+                  STEP {item.step}
+                </div>
+                <div style={{ fontSize: "11px", fontWeight: 600, color: "#E2E8F0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {item.label}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Telemetry Metrics Bar */}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "10px",
+            borderTop: "1px solid #1E293B",
+            paddingTop: "10px",
+            alignItems: "center",
+          }}
+        >
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "rgba(16, 185, 129, 0.1)",
+              border: "1px solid rgba(16, 185, 129, 0.3)",
+              borderRadius: "4px",
+              padding: "4px 10px",
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "11px",
+              color: "#34D399",
+              fontWeight: 600,
+            }}
+          >
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10B981", boxShadow: "0 0 6px #10B981" }} />
+            Multi-Step Reasoning: Active
+          </div>
+
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "rgba(99, 102, 241, 0.1)",
+              border: "1px solid rgba(99, 102, 241, 0.3)",
+              borderRadius: "4px",
+              padding: "4px 10px",
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "11px",
+              color: "#A5B4FC",
+              fontWeight: 600,
+            }}
+          >
+            <span>🛡️</span>
+            Tool Calls: Sectors API v2 (Verified)
+          </div>
+
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px",
+              background: "rgba(245, 158, 11, 0.1)",
+              border: "1px solid rgba(245, 158, 11, 0.3)",
+              borderRadius: "4px",
+              padding: "4px 10px",
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "11px",
+              color: "#FBBF24",
+              fontWeight: 600,
+            }}
+          >
+            <span>📐</span>
+            Deterministic Math Kernel: 100% Zero-LLM Hallucination
+          </div>
+        </div>
+      </section>
+
       {/* Loading Skeleton */}
       {loading && !report && (
         <div style={{ padding: "40px 20px", textAlign: "center", color: "#94A3B8", fontFamily: "'JetBrains Mono', monospace" }}>
@@ -218,7 +395,7 @@ export function AgentDossierView({
       {report && (
         <>
           {/* ═══════════════════════════════════════════════════════════════════
-              2. BLOOMBERG-STYLE INTERACTIVE LIVE THOUGHT STREAM (REACT TRACE)
+              2. INSTITUTIONAL INTERACTIVE LIVE THOUGHT STREAM (REACT TRACE)
              ═══════════════════════════════════════════════════════════════════ */}
           <section
             style={{

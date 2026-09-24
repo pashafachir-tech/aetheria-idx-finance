@@ -286,13 +286,13 @@ function fmtAccountingRp(val: number | null | undefined): string {
   const abs = Math.abs(num);
   const sign = num < 0 ? "-" : "";
   if (abs >= 1e12) {
-    return `${sign}Rp ${(abs / 1e12).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} T`;
+    return `${sign}Rp ${(abs / 1e12).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} T`;
   }
   if (abs >= 1e9) {
-    return `${sign}Rp ${(abs / 1e9).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} M`;
+    return `${sign}Rp ${(abs / 1e9).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} M`;
   }
   if (abs >= 1e6) {
-    return `${sign}Rp ${(abs / 1e6).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} Jt`;
+    return `${sign}Rp ${(abs / 1e6).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Jt`;
   }
   return `${sign}Rp ${abs.toLocaleString("id-ID")}`;
 }
@@ -2046,7 +2046,7 @@ export default function EngineRun({ initialTicker }: { initialTicker: string }) 
                                   <div style={{ position: "relative", width: "100%", height: "200px" }}>
                                     <ResponsiveContainer width="100%" height={200}>
                                       <PieChart>
-                                        <Tooltip content={<ShareholdersDonutTooltip />} />
+                                        <Tooltip content={<ShareholdersDonutTooltip />} wrapperStyle={{ zIndex: 1000 }} allowEscapeViewBox={{ x: true, y: true }} />
                                         <Pie
                                           data={donutData}
                                           dataKey="percentage"
@@ -2722,7 +2722,7 @@ export default function EngineRun({ initialTicker }: { initialTicker: string }) 
                                   tickFormatter={fmtAccountingRp}
                                   width={85}
                                 />
-                                <Tooltip content={<SeasonalityTooltip />} />
+                                <Tooltip content={<SeasonalityTooltip />} wrapperStyle={{ zIndex: 1000 }} allowEscapeViewBox={{ x: true, y: true }} />
                                 <Bar dataKey="Q1" name="Q1 Net Income" fill="#38bdf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
                                 <Bar dataKey="Q2" name="Q2 Net Income" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={28} />
                                 <Bar dataKey="Q3" name="Q3 Net Income" fill="#f59e0b" radius={[3, 3, 0, 0]} maxBarSize={28} />
@@ -3155,7 +3155,7 @@ export default function EngineRun({ initialTicker }: { initialTicker: string }) 
                                   tickLine={{ stroke: "#232735" }}
                                   width={52}
                                 />
-                                <Tooltip content={<BridgeTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} />
+                                <Tooltip content={<BridgeTooltip />} cursor={{ fill: "rgba(255,255,255,0.03)" }} wrapperStyle={{ zIndex: 1000 }} allowEscapeViewBox={{ x: true, y: true }} />
                                 <Bar dataKey="barValue" radius={[2, 2, 0, 0]}>
                                   {waterfallData.map((entry, idx) => {
                                     let fill = "#10B981";
@@ -3720,7 +3720,7 @@ export default function EngineRun({ initialTicker }: { initialTicker: string }) 
 
       {/* ═══════ FOOTER ═══════ */}
       <footer className="wb-footer">
-        <span>For research and institutional analysis only. Not investment advice. Data sourced from Sectors API v2.</span>
+        <span>For research and institutional decision-support only. Not financial or investment advice. Core market data sourced from Sectors API v2.</span>
         <span className="wb-mono">Aetheria Engine v2.4.0-idx · Zero-LLM Math Kernel · Build 2026.09.21</span>
       </footer>
     </div>

@@ -1,5 +1,6 @@
 /**
- * Autonomous Agent Orchestrator & ReAct Investigation Engine
+ * Aetheria Autonomous ReAct Research Agent & Investigation Engine
+ * Track 01: AI Agents & Assistants — Sectors Hackathon 2026
  * Implements 5-Node Autonomous Investigation DAG:
  * Node 1: Fundamental & Accrual Forensics (Zero-LLM Math)
  * Node 2: Smart Money Audit (Foreign Inflow & Top Broker Accumulation via Sectors API)
@@ -268,7 +269,7 @@ export async function runAutonomousInvestigation(
       ? `Peringatan distribusi (${dominanceStatus}): Terdeteksi tekanan distribusi aktif dari broker pengendali/institusi ke tangan ritel. Hindari pembelian agresif.`
       : cumulativeNet10d > 0
       ? `Aliran dana institusi neto positif (Rp ${(cumulativeNet10d / 1e9).toFixed(1)} M) dengan dominasi asing seimbang.`
-      : `Arus dana netral/keluar tipis. Rekomendasi disiplin pada level support teknikal.`,
+      : `Arus dana netral/keluar tipis. Tactical stance disiplin pada level support teknikal.`,
     timestamp: new Date().toISOString(),
   });
 
@@ -622,7 +623,7 @@ export async function runAutonomousInvestigation(
       input: { focus, marketPrice, intrinsicVal, flowStance, gcgRating },
     },
     observation: {
-      summary: `Stance final: "${overallStance}" (Conviction: ${convictionLevel}). Target Harga 12 Bulan: Rp ${targetPrice.toLocaleString("id-ID")} (Implied Upside: +${upsidePct}%). Kontrak tesis memuat 3 Kill Criteria dan laporan memo institusional siap ekspor.`,
+      summary: `Stance final: "${overallStance}" (Conviction: ${convictionLevel}). Nilai Wajar Intrinsik (Residual Income / DCF): Rp ${targetPrice.toLocaleString("id-ID")} (Implied Upside: +${upsidePct}%). Kontrak tesis memuat 3 Kill Criteria dan laporan memo institusional siap ekspor.`,
       dataSnippet: {
         overallStance,
         convictionLevel,
@@ -708,11 +709,11 @@ function generateMarkdownMemo(params: {
 
 ---
 
-## 1. REKOMENDASI & MANDAT EKSEKUTIF
-- **Overall Stance:** **${params.overallStance}**
+## 1. TACTICAL STANCE & MANDAT INSTITUSIONAL
+- **Tactical Stance:** **${params.overallStance}**
 - **Conviction Level:** **${params.convictionLevel}**
 - **Harga Pasar Saat Ini:** Rp ${params.marketPrice.toLocaleString("id-ID")}
-- **Target Harga (12 Bulan):** **Rp ${params.targetPrice.toLocaleString("id-ID")}** (Implied Upside: ${Math.round(((params.targetPrice - params.marketPrice) / params.marketPrice) * 100)}%)
+- **Nilai Wajar Intrinsik (Residual Income / DCF):** **Rp ${params.targetPrice.toLocaleString("id-ID")}** (Implied Upside: ${Math.round(((params.targetPrice - params.marketPrice) / params.marketPrice) * 100)}%)
 - **Nilai Wajar Model (${params.modelName}):** Rp ${params.intrinsicVal.toLocaleString("id-ID")}
 
 ---
@@ -764,6 +765,8 @@ Berikut 3 kondisi objektif yang membatalkan tesis investasi dan mewajibkan penut
    - *Rasional:* ${params.killCriteriaChecklist[2].rationale}
 
 ---
-*Laporan ini dihasilkan secara otonom oleh Aetheria Autonomous Agent Orchestrator (ReAct DAG) menggunakan Sectors API v2 & Zero-LLM Math Kernel.*
+*Laporan ini dihasilkan secara otonom oleh Aetheria Autonomous ReAct Research Agent (5-Node ReAct DAG) menggunakan Sectors API v2 & Zero-LLM Math Kernel.*
+
+*Disclaimer: For research and institutional decision-support only. Not financial or investment advice. Core market data sourced from Sectors API v2.*
 `;
 }
